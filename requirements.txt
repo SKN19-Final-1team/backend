@@ -71,7 +71,7 @@ pgvector==0.4.2
 pillow==12.1.0
 platformdirs==4.5.1
 propcache==0.4.1
-psycopg2-binary==3.3.2
+psycopg2-binary==2.9.11
 pycparser==2.23
 pydantic==2.12.5
 pydantic-settings==2.12.0
