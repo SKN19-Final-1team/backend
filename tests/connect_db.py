@@ -5,7 +5,7 @@ load_dotenv()
 
 # DB 정보
 DB_CONFIG = {
-    'host': os.getenv('DB_HOST_IP'), 
+    'host': os.getenv('DB_HOST'), 
     'dbname': os.getenv('DB_NAME'),
     'user': os.getenv('DB_USER'),
     'password': os.getenv('DB_PASSWORD'),

@@ -20,6 +20,7 @@ dirtyjson==1.0.8
 distro==1.9.0
 fastapi==0.128.0
 filetype==1.2.0
+flashtext==2.7
 frozenlist==1.8.0
 fsspec==2025.12.0
 greenlet==3.3.0
