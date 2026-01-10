@@ -68,7 +68,7 @@ def get_last_id():
         
         if result and result[0]:
             last_id = result[0]
-            last_number = int(last_id.split('_')[1])\
+            last_number = int(last_id.split('_')[1])
             return last_number + 1
         else:
             return 1

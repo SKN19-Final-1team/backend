@@ -3,6 +3,7 @@ from typing import Dict, List, Optional
 
 from flashtext import KeywordProcessor
 
+# vocab 규칙 정의
 from app.rag.vocab.rules import (
     ACTION_ALLOWLIST,
     ACTION_SYNONYMS,
@@ -15,7 +16,7 @@ from app.rag.vocab.rules import (
     ROUTE_CARD_USAGE,
 )
 
-
+#     리스트에서 중복을 제거, 최초 등장 순서는 유지
 def _unique_in_order(items: List[str]) -> List[str]:
     seen = set()
     out = []
@@ -29,12 +30,12 @@ def _unique_in_order(items: List[str]) -> List[str]:
 
 _WS_RE = re.compile(r"\s+")
 
-
+#   사용자 입력 문장 정규화 = 중복 공백 제거, 소문자 변환
 def _normalize_query(text: str) -> str:
     text = _WS_RE.sub(" ", text.strip())
     return text.lower()
 
-
+#     FlashText KeywordProcessor 생성 = 동의어 canonical 값으로 매핑
 def _build_processor(synonyms: Dict[str, List[str]]) -> KeywordProcessor:
     kp = KeywordProcessor(case_sensitive=False)
     for canonical, terms in synonyms.items():
@@ -43,7 +44,7 @@ def _build_processor(synonyms: Dict[str, List[str]]) -> KeywordProcessor:
             kp.add_keyword(term, canonical)
     return kp
 
-
+# FlashText 프로세서 사전 생성 (모듈 로딩 시 1회)
 _CARD_KP = _build_processor(CARD_NAME_SYNONYMS)
 _ACTION_KP = _build_processor(ACTION_SYNONYMS)
 _PAYMENT_KP = _build_processor(PAYMENT_SYNONYMS)
