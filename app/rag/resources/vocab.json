@@ -1,0 +1,967 @@
+{
+  "routing_examples": {
+    "card_tbl": [
+      "K패스-충남 지급일은 적립월의 익익월 7영업일 입니다.",
+      "K패스-충남 혜택 안내",
+      "경기도민 혜택(K패스-경기)",
+      "국민 행복카드를 사전에 발급받아놓고 향후에 바우처 사업을 추가할 수 있나요?",
+      "국민행복카드 발급은 누구나 가능한가요?",
+      "국민행복카드 체크카드 발급에는 어떤 준비가 필요한가요?",
+      "군 간부도 나라사랑카드 발급이 가능한가요?",
+      "군 영내에서 나라사랑카드로 금융서비스를 받을 수 있나요?",
+      "나라사랑카드 부가서비스에는 어떤 것이 있나요?",
+      "다자녀 혜택 신청 방법",
+      "2차 민생회복 소비쿠폰 대상 관련 이의 신청 방법을 자세하게 알고 싶어요.",
+      "2차 민생회복 소비쿠폰 지급 대상 여부는 어떻게 확인해야 하나요?",
+      "Apple Pay, 삼성페이 등의 간편결제 수단으로 결제해도 민생회복 소비쿠폰을 사용할 수 있나요?",
+      "1일 이용횟수 상관없이 지급되나요?",
+      "1차 대상 카드",
+      "1차 신청 대상",
+      "1차 신청 일시",
+      "1차 지급 금액",
+      "28일, 29일, 30일 이용한 내역에 적립지급되지 않았습니다",
+      "2차 대상 카드"
+    ],
+    "guide_tbl": [
+      "카드 분실·도난 시 보상받을 수 있는 금액은 어디까지인가요?",
+      "카드 분실·도난 시 이렇게 대처하세요",
+      "이용기간/한도",
+      "연회비",
+      "연회비 부담을 고려하세요",
+      "후불교통카드와 선불교통카드",
+      "카드대금을 연체해도 포인트가 적립되나요?",
+      "'출입국 정보 활용 서비스'와 'SMS서비스'를 활용하세요",
+      "CD/ATM(자동화기기) 이용 수수료",
+      "DCDS(Debt Cancellation & Debt Suspension) 이용 수수료",
+      "IC카드",
+      "가족간 합리적 소비를 원한다면 가족카드를 이용하세요",
+      "간편인증을 통한 소득조회 및 이용안내",
+      "결제대금에 오류가 있을 경우 이렇게 대처하세요",
+      "고객 물건 구입 시 유용한 선지급포인트서비스(선포인트서비스), 꼼꼼히 확인하고 이용하세요",
+      "금리인하요구권 안내",
+      "금융사기 방지",
+      "꼭 필요한 카드만 발급받으세요",
+      "꼭 확인하세요 (유의사항)",
+      "꼭 확인하세요!"
+    ]
+  },
+  "stopwords": [
+    "n/a",
+    "na",
+    "none",
+    "문의",
+    "안내"
+  ],
+  "vocab_keywords": [
+    {
+      "canonical": "K-패스",
+      "cooldown_sec": 8,
+      "filters": {
+        "card_name": "K-패스"
+      },
+      "keyword": "K-패스",
+      "route": "card_tbl",
+      "type": "CARD/PROGRAM"
+    },
+    {
+      "canonical": "K-패스",
+      "cooldown_sec": 8,
+      "filters": {
+        "card_name": "K-패스"
+      },
+      "keyword": "K패스",
+      "route": "card_tbl",
+      "type": "CARD/PROGRAM"
+    },
+    {
+      "canonical": "K-패스",
+      "cooldown_sec": 8,
+      "filters": {
+        "card_name": "K-패스"
+      },
+      "keyword": "케이 패스",
+      "route": "card_tbl",
+      "type": "CARD/PROGRAM"
+    },
+    {
+      "canonical": "K-패스",
+      "cooldown_sec": 8,
+      "filters": {
+        "card_name": "K-패스"
+      },
+      "keyword": "케이패스",
+      "route": "card_tbl",
+      "type": "CARD/PROGRAM"
+    },
+    {
+      "canonical": "국민행복카드",
+      "cooldown_sec": 8,
+      "filters": {
+        "card_name": "국민행복카드"
+      },
+      "keyword": "국민 행복카드",
+      "route": "card_tbl",
+      "type": "CARD/PROGRAM"
+    },
+    {
+      "canonical": "국민행복카드",
+      "cooldown_sec": 8,
+      "filters": {
+        "card_name": "국민행복카드"
+      },
+      "keyword": "국민행복카드",
+      "route": "card_tbl",
+      "type": "CARD/PROGRAM"
+    },
+    {
+      "canonical": "국민행복카드",
+      "cooldown_sec": 8,
+      "filters": {
+        "card_name": "국민행복카드"
+      },
+      "keyword": "행복카드",
+      "route": "card_tbl",
+      "type": "CARD/PROGRAM"
+    },
+    {
+      "canonical": "나라사랑카드",
+      "cooldown_sec": 8,
+      "filters": {
+        "card_name": "나라사랑카드"
+      },
+      "keyword": "나라사랑",
+      "route": "card_tbl",
+      "type": "CARD/PROGRAM"
+    },
+    {
+      "canonical": "나라사랑카드",
+      "cooldown_sec": 8,
+      "filters": {
+        "card_name": "나라사랑카드"
+      },
+      "keyword": "나라사랑 카드",
+      "route": "card_tbl",
+      "type": "CARD/PROGRAM"
+    },
+    {
+      "canonical": "나라사랑카드",
+      "cooldown_sec": 8,
+      "filters": {
+        "card_name": "나라사랑카드"
+      },
+      "keyword": "나라사랑카드",
+      "route": "card_tbl",
+      "type": "CARD/PROGRAM"
+    },
+    {
+      "canonical": "다둥이카드",
+      "cooldown_sec": 8,
+      "filters": {
+        "card_name": "다둥이카드"
+      },
+      "keyword": "다둥이",
+      "route": "card_tbl",
+      "type": "CARD/PROGRAM"
+    },
+    {
+      "canonical": "다둥이카드",
+      "cooldown_sec": 8,
+      "filters": {
+        "card_name": "다둥이카드"
+      },
+      "keyword": "다둥이 카드",
+      "route": "card_tbl",
+      "type": "CARD/PROGRAM"
+    },
+    {
+      "canonical": "다둥이카드",
+      "cooldown_sec": 8,
+      "filters": {
+        "card_name": "다둥이카드"
+      },
+      "keyword": "다둥이카드",
+      "route": "card_tbl",
+      "type": "CARD/PROGRAM"
+    },
+    {
+      "canonical": "다둥이카드",
+      "cooldown_sec": 8,
+      "filters": {
+        "card_name": "다둥이카드"
+      },
+      "keyword": "다자녀",
+      "route": "card_tbl",
+      "type": "CARD/PROGRAM"
+    },
+    {
+      "canonical": "민생회복 소비쿠폰",
+      "cooldown_sec": 8,
+      "filters": {
+        "card_name": "민생회복 소비쿠폰"
+      },
+      "keyword": "민생 회복 소비쿠폰",
+      "route": "card_tbl",
+      "type": "CARD/PROGRAM"
+    },
+    {
+      "canonical": "민생회복 소비쿠폰",
+      "cooldown_sec": 8,
+      "filters": {
+        "card_name": "민생회복 소비쿠폰"
+      },
+      "keyword": "민생회복 소비쿠폰",
+      "route": "card_tbl",
+      "type": "CARD/PROGRAM"
+    },
+    {
+      "canonical": "민생회복 소비쿠폰",
+      "cooldown_sec": 8,
+      "filters": {
+        "card_name": "민생회복 소비쿠폰"
+      },
+      "keyword": "민생회복쿠폰",
+      "route": "card_tbl",
+      "type": "CARD/PROGRAM"
+    },
+    {
+      "canonical": "시니어카드",
+      "cooldown_sec": 8,
+      "filters": {
+        "card_name": "시니어카드"
+      },
+      "keyword": "시니어",
+      "route": "card_tbl",
+      "type": "CARD/PROGRAM"
+    },
+    {
+      "canonical": "시니어카드",
+      "cooldown_sec": 8,
+      "filters": {
+        "card_name": "시니어카드"
+      },
+      "keyword": "시니어 카드",
+      "route": "card_tbl",
+      "type": "CARD/PROGRAM"
+    },
+    {
+      "canonical": "시니어카드",
+      "cooldown_sec": 8,
+      "filters": {
+        "card_name": "시니어카드"
+      },
+      "keyword": "시니어카드",
+      "route": "card_tbl",
+      "type": "CARD/PROGRAM"
+    },
+    {
+      "canonical": "결제취소",
+      "cooldown_sec": 5,
+      "filters": {
+        "intent": "결제취소"
+      },
+      "keyword": "결제 취소",
+      "route": "guide_tbl",
+      "type": "INTENT"
+    },
+    {
+      "canonical": "결제취소",
+      "cooldown_sec": 5,
+      "filters": {
+        "intent": "결제취소"
+      },
+      "keyword": "결제취소",
+      "route": "guide_tbl",
+      "type": "INTENT"
+    },
+    {
+      "canonical": "결제취소",
+      "cooldown_sec": 5,
+      "filters": {
+        "intent": "결제취소"
+      },
+      "keyword": "승인 취소",
+      "route": "guide_tbl",
+      "type": "INTENT"
+    },
+    {
+      "canonical": "결제취소",
+      "cooldown_sec": 5,
+      "filters": {
+        "intent": "결제취소"
+      },
+      "keyword": "승인취소",
+      "route": "guide_tbl",
+      "type": "INTENT"
+    },
+    {
+      "canonical": "교통",
+      "cooldown_sec": 5,
+      "filters": {
+        "intent": "교통"
+      },
+      "keyword": "교통",
+      "route": "guide_tbl",
+      "type": "INTENT"
+    },
+    {
+      "canonical": "교통",
+      "cooldown_sec": 5,
+      "filters": {
+        "intent": "교통"
+      },
+      "keyword": "교통 카드",
+      "route": "guide_tbl",
+      "type": "INTENT"
+    },
+    {
+      "canonical": "교통",
+      "cooldown_sec": 5,
+      "filters": {
+        "intent": "교통"
+      },
+      "keyword": "교통카드",
+      "route": "guide_tbl",
+      "type": "INTENT"
+    },
+    {
+      "canonical": "교통",
+      "cooldown_sec": 5,
+      "filters": {
+        "intent": "교통"
+      },
+      "keyword": "후불 교통",
+      "route": "guide_tbl",
+      "type": "INTENT"
+    },
+    {
+      "canonical": "교통",
+      "cooldown_sec": 5,
+      "filters": {
+        "intent": "교통"
+      },
+      "keyword": "후불교통",
+      "route": "guide_tbl",
+      "type": "INTENT"
+    },
+    {
+      "canonical": "분실",
+      "cooldown_sec": 5,
+      "filters": {
+        "intent": "분실"
+      },
+      "keyword": "도난",
+      "route": "guide_tbl",
+      "type": "INTENT"
+    },
+    {
+      "canonical": "분실",
+      "cooldown_sec": 5,
+      "filters": {
+        "intent": "분실"
+      },
+      "keyword": "두고 왔",
+      "route": "guide_tbl",
+      "type": "INTENT"
+    },
+    {
+      "canonical": "분실",
+      "cooldown_sec": 5,
+      "filters": {
+        "intent": "분실"
+      },
+      "keyword": "두고왔",
+      "route": "guide_tbl",
+      "type": "INTENT"
+    },
+    {
+      "canonical": "분실",
+      "cooldown_sec": 5,
+      "filters": {
+        "intent": "분실"
+      },
+      "keyword": "못 찾",
+      "route": "guide_tbl",
+      "type": "INTENT"
+    },
+    {
+      "canonical": "분실",
+      "cooldown_sec": 5,
+      "filters": {
+        "intent": "분실"
+      },
+      "keyword": "못 찾겠",
+      "route": "guide_tbl",
+      "type": "INTENT"
+    },
+    {
+      "canonical": "분실",
+      "cooldown_sec": 5,
+      "filters": {
+        "intent": "분실"
+      },
+      "keyword": "못찾",
+      "route": "guide_tbl",
+      "type": "INTENT"
+    },
+    {
+      "canonical": "분실",
+      "cooldown_sec": 5,
+      "filters": {
+        "intent": "분실"
+      },
+      "keyword": "못찾겠",
+      "route": "guide_tbl",
+      "type": "INTENT"
+    },
+    {
+      "canonical": "분실",
+      "cooldown_sec": 5,
+      "filters": {
+        "intent": "분실"
+      },
+      "keyword": "분실",
+      "route": "guide_tbl",
+      "type": "INTENT"
+    },
+    {
+      "canonical": "분실",
+      "cooldown_sec": 5,
+      "filters": {
+        "intent": "분실"
+      },
+      "keyword": "분실했",
+      "route": "guide_tbl",
+      "type": "INTENT"
+    },
+    {
+      "canonical": "분실",
+      "cooldown_sec": 5,
+      "filters": {
+        "intent": "분실"
+      },
+      "keyword": "없어졌",
+      "route": "guide_tbl",
+      "type": "INTENT"
+    },
+    {
+      "canonical": "분실",
+      "cooldown_sec": 5,
+      "filters": {
+        "intent": "분실"
+      },
+      "keyword": "잃어버",
+      "route": "guide_tbl",
+      "type": "INTENT"
+    },
+    {
+      "canonical": "분실",
+      "cooldown_sec": 5,
+      "filters": {
+        "intent": "분실"
+      },
+      "keyword": "잃어버렸",
+      "route": "guide_tbl",
+      "type": "INTENT"
+    },
+    {
+      "canonical": "분실",
+      "cooldown_sec": 5,
+      "filters": {
+        "intent": "분실"
+      },
+      "keyword": "잃어버렸어요",
+      "route": "guide_tbl",
+      "type": "INTENT"
+    },
+    {
+      "canonical": "연회비",
+      "cooldown_sec": 5,
+      "filters": {
+        "intent": "연회비"
+      },
+      "keyword": "연 회비",
+      "route": "guide_tbl",
+      "type": "INTENT"
+    },
+    {
+      "canonical": "연회비",
+      "cooldown_sec": 5,
+      "filters": {
+        "intent": "연회비"
+      },
+      "keyword": "연회비",
+      "route": "guide_tbl",
+      "type": "INTENT"
+    },
+    {
+      "canonical": "재발급",
+      "cooldown_sec": 5,
+      "filters": {
+        "intent": "재발급"
+      },
+      "keyword": "다시 발급",
+      "route": "guide_tbl",
+      "type": "INTENT"
+    },
+    {
+      "canonical": "재발급",
+      "cooldown_sec": 5,
+      "filters": {
+        "intent": "재발급"
+      },
+      "keyword": "새로 발급",
+      "route": "guide_tbl",
+      "type": "INTENT"
+    },
+    {
+      "canonical": "재발급",
+      "cooldown_sec": 5,
+      "filters": {
+        "intent": "재발급"
+      },
+      "keyword": "재발급",
+      "route": "guide_tbl",
+      "type": "INTENT"
+    },
+    {
+      "canonical": "재발급",
+      "cooldown_sec": 5,
+      "filters": {
+        "intent": "재발급"
+      },
+      "keyword": "재발행",
+      "route": "guide_tbl",
+      "type": "INTENT"
+    },
+    {
+      "canonical": "적립",
+      "cooldown_sec": 5,
+      "filters": {
+        "intent": "적립"
+      },
+      "keyword": "적립",
+      "route": "guide_tbl",
+      "type": "INTENT"
+    },
+    {
+      "canonical": "적립",
+      "cooldown_sec": 5,
+      "filters": {
+        "intent": "적립"
+      },
+      "keyword": "포인트 적립",
+      "route": "guide_tbl",
+      "type": "INTENT"
+    },
+    {
+      "canonical": "청구할인",
+      "cooldown_sec": 5,
+      "filters": {
+        "intent": "청구할인"
+      },
+      "keyword": "청구 할인",
+      "route": "guide_tbl",
+      "type": "INTENT"
+    },
+    {
+      "canonical": "청구할인",
+      "cooldown_sec": 5,
+      "filters": {
+        "intent": "청구할인"
+      },
+      "keyword": "청구할인",
+      "route": "guide_tbl",
+      "type": "INTENT"
+    },
+    {
+      "canonical": "한도",
+      "cooldown_sec": 5,
+      "filters": {
+        "intent": "한도"
+      },
+      "keyword": "limit",
+      "route": "guide_tbl",
+      "type": "INTENT"
+    },
+    {
+      "canonical": "한도",
+      "cooldown_sec": 5,
+      "filters": {
+        "intent": "한도"
+      },
+      "keyword": "상향",
+      "route": "guide_tbl",
+      "type": "INTENT"
+    },
+    {
+      "canonical": "한도",
+      "cooldown_sec": 5,
+      "filters": {
+        "intent": "한도"
+      },
+      "keyword": "얼마까지",
+      "route": "guide_tbl",
+      "type": "INTENT"
+    },
+    {
+      "canonical": "한도",
+      "cooldown_sec": 5,
+      "filters": {
+        "intent": "한도"
+      },
+      "keyword": "증액",
+      "route": "guide_tbl",
+      "type": "INTENT"
+    },
+    {
+      "canonical": "한도",
+      "cooldown_sec": 5,
+      "filters": {
+        "intent": "한도"
+      },
+      "keyword": "한도",
+      "route": "guide_tbl",
+      "type": "INTENT"
+    },
+    {
+      "canonical": "해지",
+      "cooldown_sec": 5,
+      "filters": {
+        "intent": "해지"
+      },
+      "keyword": "없애",
+      "route": "guide_tbl",
+      "type": "INTENT"
+    },
+    {
+      "canonical": "해지",
+      "cooldown_sec": 5,
+      "filters": {
+        "intent": "해지"
+      },
+      "keyword": "없앨래",
+      "route": "guide_tbl",
+      "type": "INTENT"
+    },
+    {
+      "canonical": "해지",
+      "cooldown_sec": 5,
+      "filters": {
+        "intent": "해지"
+      },
+      "keyword": "해지",
+      "route": "guide_tbl",
+      "type": "INTENT"
+    },
+    {
+      "canonical": "네이버페이",
+      "cooldown_sec": 6,
+      "filters": {
+        "payment_method": "네이버페이"
+      },
+      "keyword": "naver pay",
+      "route": "card_tbl",
+      "type": "PAYMENT"
+    },
+    {
+      "canonical": "네이버페이",
+      "cooldown_sec": 6,
+      "filters": {
+        "payment_method": "네이버페이"
+      },
+      "keyword": "네이버 페이",
+      "route": "card_tbl",
+      "type": "PAYMENT"
+    },
+    {
+      "canonical": "네이버페이",
+      "cooldown_sec": 6,
+      "filters": {
+        "payment_method": "네이버페이"
+      },
+      "keyword": "네이버페이",
+      "route": "card_tbl",
+      "type": "PAYMENT"
+    },
+    {
+      "canonical": "삼성페이",
+      "cooldown_sec": 6,
+      "filters": {
+        "payment_method": "삼성페이"
+      },
+      "keyword": "samsung pay",
+      "route": "card_tbl",
+      "type": "PAYMENT"
+    },
+    {
+      "canonical": "삼성페이",
+      "cooldown_sec": 6,
+      "filters": {
+        "payment_method": "삼성페이"
+      },
+      "keyword": "삼성 페이",
+      "route": "card_tbl",
+      "type": "PAYMENT"
+    },
+    {
+      "canonical": "삼성페이",
+      "cooldown_sec": 6,
+      "filters": {
+        "payment_method": "삼성페이"
+      },
+      "keyword": "삼성페이",
+      "route": "card_tbl",
+      "type": "PAYMENT"
+    },
+    {
+      "canonical": "애플페이",
+      "cooldown_sec": 6,
+      "filters": {
+        "payment_method": "애플페이"
+      },
+      "keyword": "apple pay",
+      "route": "card_tbl",
+      "type": "PAYMENT"
+    },
+    {
+      "canonical": "애플페이",
+      "cooldown_sec": 6,
+      "filters": {
+        "payment_method": "애플페이"
+      },
+      "keyword": "애플 페이",
+      "route": "card_tbl",
+      "type": "PAYMENT"
+    },
+    {
+      "canonical": "애플페이",
+      "cooldown_sec": 6,
+      "filters": {
+        "payment_method": "애플페이"
+      },
+      "keyword": "애플페이",
+      "route": "card_tbl",
+      "type": "PAYMENT"
+    },
+    {
+      "canonical": "카카오페이",
+      "cooldown_sec": 6,
+      "filters": {
+        "payment_method": "카카오페이"
+      },
+      "keyword": "kakao pay",
+      "route": "card_tbl",
+      "type": "PAYMENT"
+    },
+    {
+      "canonical": "카카오페이",
+      "cooldown_sec": 6,
+      "filters": {
+        "payment_method": "카카오페이"
+      },
+      "keyword": "카카오 페이",
+      "route": "card_tbl",
+      "type": "PAYMENT"
+    },
+    {
+      "canonical": "카카오페이",
+      "cooldown_sec": 6,
+      "filters": {
+        "payment_method": "카카오페이"
+      },
+      "keyword": "카카오페이",
+      "route": "card_tbl",
+      "type": "PAYMENT"
+    },
+    {
+      "canonical": "티머니",
+      "cooldown_sec": 6,
+      "filters": {
+        "payment_method": "티머니"
+      },
+      "keyword": "t-money",
+      "route": "card_tbl",
+      "type": "PAYMENT"
+    },
+    {
+      "canonical": "티머니",
+      "cooldown_sec": 6,
+      "filters": {
+        "payment_method": "티머니"
+      },
+      "keyword": "tmoney",
+      "route": "card_tbl",
+      "type": "PAYMENT"
+    },
+    {
+      "canonical": "티머니",
+      "cooldown_sec": 6,
+      "filters": {
+        "payment_method": "티머니"
+      },
+      "keyword": "t머니",
+      "route": "card_tbl",
+      "type": "PAYMENT"
+    },
+    {
+      "canonical": "티머니",
+      "cooldown_sec": 6,
+      "filters": {
+        "payment_method": "티머니"
+      },
+      "keyword": "티 머니",
+      "route": "card_tbl",
+      "type": "PAYMENT"
+    },
+    {
+      "canonical": "티머니",
+      "cooldown_sec": 6,
+      "filters": {
+        "payment_method": "티머니"
+      },
+      "keyword": "티머니",
+      "route": "card_tbl",
+      "type": "PAYMENT"
+    },
+    {
+      "canonical": "발급",
+      "cooldown_sec": 5,
+      "filters": {
+        "weak_intent": "발급"
+      },
+      "keyword": "발급",
+      "route": "guide_tbl",
+      "type": "WEAK_INTENT"
+    },
+    {
+      "canonical": "발급",
+      "cooldown_sec": 5,
+      "filters": {
+        "weak_intent": "발급"
+      },
+      "keyword": "발급 방법",
+      "route": "guide_tbl",
+      "type": "WEAK_INTENT"
+    },
+    {
+      "canonical": "발급",
+      "cooldown_sec": 5,
+      "filters": {
+        "weak_intent": "발급"
+      },
+      "keyword": "발급방법",
+      "route": "guide_tbl",
+      "type": "WEAK_INTENT"
+    },
+    {
+      "canonical": "사용",
+      "cooldown_sec": 5,
+      "filters": {
+        "weak_intent": "사용"
+      },
+      "keyword": "사용",
+      "route": "guide_tbl",
+      "type": "WEAK_INTENT"
+    },
+    {
+      "canonical": "사용",
+      "cooldown_sec": 5,
+      "filters": {
+        "weak_intent": "사용"
+      },
+      "keyword": "사용 방법",
+      "route": "guide_tbl",
+      "type": "WEAK_INTENT"
+    },
+    {
+      "canonical": "사용",
+      "cooldown_sec": 5,
+      "filters": {
+        "weak_intent": "사용"
+      },
+      "keyword": "사용방법",
+      "route": "guide_tbl",
+      "type": "WEAK_INTENT"
+    },
+    {
+      "canonical": "사용",
+      "cooldown_sec": 5,
+      "filters": {
+        "weak_intent": "사용"
+      },
+      "keyword": "사용법",
+      "route": "guide_tbl",
+      "type": "WEAK_INTENT"
+    },
+    {
+      "canonical": "사용처",
+      "cooldown_sec": 5,
+      "filters": {
+        "weak_intent": "사용처"
+      },
+      "keyword": "사용 가능한 곳",
+      "route": "guide_tbl",
+      "type": "WEAK_INTENT"
+    },
+    {
+      "canonical": "사용처",
+      "cooldown_sec": 5,
+      "filters": {
+        "weak_intent": "사용처"
+      },
+      "keyword": "사용처",
+      "route": "guide_tbl",
+      "type": "WEAK_INTENT"
+    },
+    {
+      "canonical": "사용처",
+      "cooldown_sec": 5,
+      "filters": {
+        "weak_intent": "사용처"
+      },
+      "keyword": "어디서 사용",
+      "route": "guide_tbl",
+      "type": "WEAK_INTENT"
+    },
+    {
+      "canonical": "신청",
+      "cooldown_sec": 5,
+      "filters": {
+        "weak_intent": "신청"
+      },
+      "keyword": "신청",
+      "route": "guide_tbl",
+      "type": "WEAK_INTENT"
+    },
+    {
+      "canonical": "신청",
+      "cooldown_sec": 5,
+      "filters": {
+        "weak_intent": "신청"
+      },
+      "keyword": "신청 방법",
+      "route": "guide_tbl",
+      "type": "WEAK_INTENT"
+    },
+    {
+      "canonical": "신청",
+      "cooldown_sec": 5,
+      "filters": {
+        "weak_intent": "신청"
+      },
+      "keyword": "신청방법",
+      "route": "guide_tbl",
+      "type": "WEAK_INTENT"
+    },
+    {
+      "canonical": "혜택",
+      "cooldown_sec": 5,
+      "filters": {
+        "weak_intent": "혜택"
+      },
+      "keyword": "혜택",
+      "route": "guide_tbl",
+      "type": "WEAK_INTENT"
+    }
+  ]
+}
