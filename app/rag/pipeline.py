@@ -8,6 +8,7 @@ from app.rag.router import route_query
 from app.rag.vocab.rules import STOPWORDS
 
 
+# --- 설정 ---
 @dataclass(frozen=True)
 class RAGConfig:
     top_k: int = 5
@@ -19,10 +20,12 @@ class RAGConfig:
     strict_guidance_script: bool = True
 
 
+# --- 라우팅 ---
 def route(query: str) -> Dict[str, Any]:
     return route_query(query)
 
 
+# --- 문서 우선순위 ---
 def _is_definition_title(title: str) -> bool:
     if not title:
         return False
@@ -43,6 +46,7 @@ def _promote_definition_doc(docs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return docs
 
 
+# --- 키워드/토큰 정제 ---
 _TERM_WS_RE = re.compile(r"\s+")
 _TERM_CLEAN_RE = re.compile(r"[^\w가-힣]+")
 _PARTICLE_SUFFIXES = (
@@ -91,6 +95,8 @@ _KEYWORD_STOPWORDS = {
     "란",
     "카드",
 }
+_ISSUE_FILTER_TOKENS = ("발급", "신청", "재발급", "대상", "서류")
+_BENEFIT_FILTER_TOKENS = ("적립", "혜택", "유의", "제외", "포인트", "할인")
 
 
 def _unique_in_order(items: List[str]) -> List[str]:
@@ -176,15 +182,77 @@ def _collect_query_keywords(query: str, routing: Dict[str, Any], normalize: bool
     return _unique_in_order(normalized)
 
 
+def _text_has_any(text: str, tokens: tuple[str, ...]) -> bool:
+    lowered = (text or "").lower()
+    return any(token in lowered for token in tokens)
+
+
+# --- 카드 후처리 ---
+def _split_cards_by_query(cards: List[Dict[str, Any]], query: str) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    terms = set(_extract_query_terms(query))
+    mode: Optional[str] = None
+    if terms.intersection(_ISSUE_FILTER_TOKENS):
+        mode = "ISSUE"
+    elif terms.intersection(_BENEFIT_FILTER_TOKENS):
+        mode = "BENEFIT"
+
+    if not mode:
+        return cards[:2], cards[2:4]
+
+    def _blocked(card: Dict[str, Any]) -> bool:
+        text = f"{card.get('title') or ''} {card.get('content') or ''}"
+        if mode == "ISSUE":
+            return _text_has_any(text, _BENEFIT_FILTER_TOKENS)
+        return _text_has_any(text, _ISSUE_FILTER_TOKENS)
+
+    kept = [card for card in cards if not _blocked(card)]
+    blocked = [card for card in cards if _blocked(card)]
+
+    current = kept[:2]
+    next_step = kept[2:4]
+    if len(current) < 2:
+        needed = 2 - len(current)
+        current.extend(blocked[:needed])
+        blocked = blocked[needed:]
+    if len(next_step) < 2:
+        needed = 2 - len(next_step)
+        next_step.extend(blocked[:needed])
+    return current, next_step
+
+
+def _omit_empty(value: Any) -> Any:
+    if isinstance(value, dict):
+        cleaned = {}
+        for key, val in value.items():
+            cleaned_val = _omit_empty(val)
+            if cleaned_val in ("", None, [], {}):
+                continue
+            cleaned[key] = cleaned_val
+        return cleaned
+    if isinstance(value, list):
+        cleaned_list = []
+        for item in value:
+            cleaned_item = _omit_empty(item)
+            if cleaned_item in ("", None, [], {}):
+                continue
+            cleaned_list.append(cleaned_item)
+        return cleaned_list
+    return value
+
+
+# --- 검색 ---
 async def retrieve(
     query: str,
     routing: Dict[str, Any],
     top_k: int,
 ) -> List[Dict[str, Any]]:
     filters = routing.get("filters") or {}
+    route_name = routing.get("route")
 
     sources = set()
-    if filters.get("card_name"):
+    if route_name == "card_info":
+        sources.add("card_tbl")
+    elif filters.get("card_name"):
         sources.update({"card_tbl", "guide_tbl"})
     if filters.get("payment_method"):
         sources.update({"card_tbl", "guide_tbl"})
@@ -201,6 +269,7 @@ async def retrieve(
     )
 
 
+# --- 답변 생성 ---
 def answer(
     query: str,
     docs: List[Dict[str, Any]],
@@ -210,6 +279,7 @@ def answer(
     return generate_answer(query=query, docs=docs, model=model, temperature=temperature)
 
 
+# --- 파이프라인 ---
 async def run_rag(query: str, config: Optional[RAGConfig] = None) -> Dict[str, Any]:
     cfg = config or RAGConfig()
     routing = route(query)
@@ -237,10 +307,12 @@ async def run_rag(query: str, config: Optional[RAGConfig] = None) -> Dict[str, A
     query_keywords = _collect_query_keywords(query, routing, cfg.normalize_keywords)
     for card in cards:
         card["keywords"] = query_keywords
+    cards = [_omit_empty(card) for card in cards]
+    current_cards, next_cards = _split_cards_by_query(cards, query)
 
     response = {
-        "currentSituation": cards[:2],
-        "nextStep": cards[2:4],
+        "currentSituation": current_cards,
+        "nextStep": next_cards,
         "guidanceScript": guidance_script or "",
         "routing": routing,
         "meta": {"model": cfg.model, "doc_count": len(docs), "context_chars": 0},

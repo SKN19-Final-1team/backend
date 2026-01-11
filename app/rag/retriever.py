@@ -20,12 +20,45 @@ QUERY_TITLE_WEIGHT = 2
 QUERY_CONTENT_WEIGHT = 1
 CARD_META_WEIGHT = 3
 TITLE_SCORE_WEIGHT = 0.001
+ISSUANCE_HINT_TOKENS = ("발급", "신청", "재발급", "대상", "서류")
+CATEGORY_MATCH_TOKENS = ("발급", "신청", "재발급", "대상", "서류", "적립", "혜택")
+ISSUANCE_TITLE_BONUS = {
+    "발급 대상": 6,
+    "발급": 4,
+    "신청": 3,
+    "구비": 2,
+    "서류": 2,
+    "신규": 2,
+}
+ISSUANCE_TITLE_DEMOTE = ("유의사항", "공통 제외", "적립", "혜택")
+CATEGORY_TITLE_BONUS = {
+    "적립 서비스": 4,
+    "일상 생활비": 3,
+    "필수 생활비": 3,
+    "포인트 적립": 2,
+}
+CATEGORY_TITLE_DEMOTE = ("유의사항", "공통 제외")
+KEYWORD_STOPWORDS = {"카드"}
+PRIORITY_TERMS_BY_CATEGORY = {
+    "발급": ["발급 대상"],
+    "신청": ["발급 대상"],
+    "재발급": ["발급 대상"],
+    "적립": ["적립 서비스", "일상 생활비 적립", "필수 생활비 적립", "포인트 적립"],
+}
+ISSUE_TERMS = {"발급", "신청", "재발급", "대상", "서류"}
+BENEFIT_TERMS = {"적립", "혜택", "할인", "포인트"}
+REISSUE_TERMS = {"재발급", "재발행"}
+REISSUE_TITLE_PENALTY = 4
+MIN_GUIDE_CONTENT_LEN = 60
+_BROKEN_JSON_RE = re.compile(r"\}\s*,\s*\{")
 
 
+# --- 라우터 진입점 ---
 def route_query(query: str) -> Dict[str, Optional[object]]:
     return _route_query(query)
 
 
+# --- 공통 유틸 ---
 def _as_list(value: Optional[object]) -> List[str]:
     if value is None:
         return []
@@ -45,6 +78,7 @@ def _unique_in_order(items: List[str]) -> List[str]:
     return out
 
 
+# --- 용어 확장/분류 ---
 def _expand_no_space_terms(terms: List[str]) -> List[str]:
     out = []
     for term in terms:
@@ -83,6 +117,76 @@ def _expand_weak_terms(terms: List[str]) -> List[str]:
     return _unique_in_order([*terms, *expanded])
 
 
+def _extract_category_terms(terms: List[str]) -> List[str]:
+    hits: List[str] = []
+    for term in terms:
+        for hint in CATEGORY_MATCH_TOKENS:
+            if hint in term:
+                hits.append(hint)
+    if "발급" in hits and "대상" in hits:
+        hits.append("발급 대상")
+    return _unique_in_order(hits)
+
+
+# --- 제목/카테고리 점수 ---
+def _issuance_title_bonus(title: Optional[str], category_terms: List[str]) -> int:
+    if not title or not category_terms:
+        return 0
+    if not any(term in ISSUANCE_HINT_TOKENS for term in category_terms):
+        return 0
+    score = 0
+    for token, bonus in ISSUANCE_TITLE_BONUS.items():
+        if token in title:
+            score += bonus
+    if any(token in title for token in ISSUANCE_TITLE_DEMOTE):
+        score -= 2
+    return score
+
+
+def _category_title_bonus(title: Optional[str], category_terms: List[str]) -> int:
+    if not title or not category_terms:
+        return 0
+    if not any(term in ("적립", "혜택") for term in category_terms):
+        return 0
+    score = 0
+    for token, bonus in CATEGORY_TITLE_BONUS.items():
+        if token in title:
+            score += bonus
+    if any(token in title for token in CATEGORY_TITLE_DEMOTE):
+        score -= 2
+    return score
+
+
+def _priority_terms(category_terms: List[str]) -> List[str]:
+    terms: List[str] = []
+    for term in category_terms:
+        terms.extend(PRIORITY_TERMS_BY_CATEGORY.get(term, []))
+    return _unique_in_order(terms)
+
+
+def _select_search_mode(terms: List[str]) -> str:
+    if any(term in ISSUE_TERMS for term in terms):
+        return "ISSUE"
+    if any(term in BENEFIT_TERMS for term in terms):
+        return "BENEFIT"
+    return "GENERAL"
+
+
+# --- guide 문서 정리 ---
+def _is_noisy_guide_doc(title: Optional[str], content: str) -> bool:
+    if not title:
+        return True
+    if not content or len(content.strip()) < MIN_GUIDE_CONTENT_LEN:
+        return True
+    if _BROKEN_JSON_RE.search(content):
+        return True
+    stripped = content.lstrip()
+    if stripped.startswith(("}", "]")):
+        return True
+    return False
+
+
+# --- 매칭 점수 ---
 def _title_match_score(title: Optional[str], terms: List[str], weight: int) -> int:
     if not title:
         return 0
@@ -117,7 +221,12 @@ def _card_meta_score(metadata: Dict[str, object], card_values: List[str]) -> int
         value_str = str(value)
         if card_name_str == value_str:
             return CARD_META_WEIGHT
-        if card_name_norm == value_str.replace(" ", ""):
+        value_norm = value_str.replace(" ", "")
+        if card_name_norm == value_norm:
+            return CARD_META_WEIGHT
+        if value_str and value_str in card_name_str:
+            return CARD_META_WEIGHT
+        if value_norm and value_norm in card_name_norm:
             return CARD_META_WEIGHT
     return 0
 
@@ -130,6 +239,21 @@ def _card_term_match(title: Optional[str], content: str, card_terms: List[str]) 
     return False
 
 
+def _category_match_score(meta: Dict[str, object], terms: List[str]) -> int:
+    if not meta or not terms:
+        return 0
+    parts = []
+    for key in ("category", "category1", "category2"):
+        value = meta.get(key)
+        if isinstance(value, str) and value:
+            parts.append(value)
+    if not parts:
+        return 0
+    category_text = " ".join(parts)
+    return _title_match_score(category_text, terms, 1)
+
+
+# --- SQL 조건 구성 ---
 def _build_like_group(terms: List[str], params: List[str]) -> Optional[str]:
     if not terms:
         return None
@@ -140,6 +264,7 @@ def _build_like_group(terms: List[str], params: List[str]) -> Optional[str]:
     return "(" + " OR ".join(term_clauses) + ")"
 
 
+# --- 쿼리 파싱 ---
 def _build_query_text(query: str, query_template: Optional[str]) -> str:
     if query_template:
         merged = f"{query_template} {query}".strip()
@@ -166,6 +291,7 @@ def _extract_query_terms(query: str) -> List[str]:
     return _unique_in_order(terms)
 
 
+# --- 콘텐츠 정규화 ---
 def _parse_json_content(content: str) -> Dict[str, object]:
     if not content:
         return {}
@@ -230,6 +356,7 @@ def _normalize_doc_fields(
     return title, normalized_content, meta
 
 
+# --- DB 필터 구성 ---
 def build_where_clause(
     filters: Optional[Dict[str, object]],
     table: str,
@@ -248,6 +375,18 @@ def build_where_clause(
         params.extend(values)
         has_category = True
 
+    category_terms = _as_list(filters.get("category"))
+    if category_terms and table == "card_tbl":
+        term_clauses = []
+        for term in category_terms:
+            term_clauses.append(
+                "(metadata->>'category' ILIKE %s OR metadata->>'category1' ILIKE %s OR metadata->>'category2' ILIKE %s)"
+            )
+            params.extend([f"%{term}%", f"%{term}%", f"%{term}%"])
+        if term_clauses:
+            clauses.append("(" + " OR ".join(term_clauses) + ")")
+            has_category = True
+
     card_values = _as_list(filters.get("card_name"))
     card_terms = _expand_card_terms(card_values)
     intent_terms = _expand_action_terms(_as_list(filters.get("intent")))
@@ -259,20 +398,27 @@ def build_where_clause(
     else:
         card_meta_clause = None
         if card_values:
-            placeholders = ", ".join(["%s"] * len(card_values))
-            card_meta_clause = f"(metadata->>'card_name' IN ({placeholders}))"
-            params.extend(card_values)
-        card_group = _build_like_group(card_terms, params)
+            term_clauses = []
+            for value in card_values:
+                value_str = str(value)
+                value_norm = value_str.replace(" ", "")
+                term_clauses.append(
+                    "(replace(metadata->>'card_name', ' ', '') ILIKE %s OR metadata->>'card_name' ILIKE %s)"
+                )
+                params.extend([f"%{value_norm}%", f"%{value_str}%"])
+            if term_clauses:
+                card_meta_clause = "(" + " OR ".join(term_clauses) + ")"
+        card_group = None
         payment_group = None
-        if not card_group and not card_meta_clause:
-            payment_only = payment_terms and not has_intent and not has_category
-            if payment_only:
-                payment_group = None
-            else:
-                payment_group = _build_like_group(payment_terms, params)
-        if card_meta_clause and card_group:
-            clauses.append(f"({card_meta_clause} OR {card_group})")
-        elif card_meta_clause:
+        if not card_meta_clause:
+            card_group = _build_like_group(card_terms, params)
+            if not card_group:
+                payment_only = payment_terms and not has_intent and not has_category
+                if payment_only:
+                    payment_group = None
+                else:
+                    payment_group = _build_like_group(payment_terms, params)
+        if card_meta_clause:
             clauses.append(card_meta_clause)
         elif card_group:
             clauses.append(card_group)
@@ -284,6 +430,7 @@ def build_where_clause(
     return " WHERE " + " AND ".join(clauses), params
 
 
+# --- DB 설정/벡터 검색 ---
 def _db_config() -> Dict[str, object]:
     host = os.getenv("DB_HOST_IP") or os.getenv("DB_HOST")
     cfg = {
@@ -352,12 +499,32 @@ def text_search(
     table: str,
     terms: List[str],
     limit: int,
+    filters: Optional[Dict[str, object]] = None,
 ) -> List[Tuple[object, str, Dict[str, object], float]]:
     if not terms:
         return []
     table = _safe_table(table)
+    filters = filters or {}
     params: List[str] = []
-    where_sql = _build_like_group(terms, params)
+    term_clauses = []
+    for term in terms:
+        term_clauses.append(
+            "("
+            "content ILIKE %s OR "
+            "metadata->>'title' ILIKE %s OR "
+            "metadata->>'category' ILIKE %s OR "
+            "metadata->>'category1' ILIKE %s OR "
+            "metadata->>'category2' ILIKE %s"
+            ")"
+        )
+        params.extend([f"%{term}%"] * 5)
+    where_sql = "(" + " OR ".join(term_clauses) + ")" if term_clauses else ""
+    if table == "card_tbl":
+        card_values = _as_list(filters.get("card_name"))
+        if card_values:
+            placeholders = ", ".join(["%s"] * len(card_values))
+            where_sql = f"({where_sql}) AND metadata->>'card_name' IN ({placeholders})"
+            params.extend(card_values)
     if not where_sql:
         return []
     with psycopg2.connect(**_db_config()) as conn:
@@ -368,6 +535,7 @@ def text_search(
             return cur.fetchall()
 
 
+# --- 후보 랭킹 ---
 def _build_candidates_from_rows(
     vec_rows: List[Tuple[object, str, Dict[str, object], float]],
     kw_rows: List[Tuple[object, str, Dict[str, object], float]],
@@ -376,6 +544,9 @@ def _build_candidates_from_rows(
     card_terms: List[str],
     rank_terms: List[str],
     query_terms: List[str],
+    category_terms: List[str],
+    search_mode: str,
+    wants_reissue: bool,
 ) -> List[Tuple[int, float, Dict[str, object]]]:
     vec_rank: Dict[str, int] = {}
     kw_rank: Dict[str, int] = {}
@@ -387,6 +558,8 @@ def _build_candidates_from_rows(
         if key in vec_docs:
             continue
         title, normalized_content, normalized_meta = _normalize_doc_fields(content, metadata)
+        if table == "guide_tbl" and _is_noisy_guide_doc(title, normalized_content):
+            continue
         output_id = normalized_meta.get("id") or doc_id
         vec_docs[key] = {
             "id": str(output_id) if output_id is not None else "",
@@ -404,6 +577,8 @@ def _build_candidates_from_rows(
         if key in kw_docs:
             continue
         title, normalized_content, normalized_meta = _normalize_doc_fields(content, metadata)
+        if table == "guide_tbl" and _is_noisy_guide_doc(title, normalized_content):
+            continue
         output_id = normalized_meta.get("id") or doc_id
         kw_docs[key] = {
             "id": str(output_id) if output_id is not None else "",
@@ -427,18 +602,48 @@ def _build_candidates_from_rows(
         if key in kw_rank:
             rrf_score += 1.0 / (RRF_K + kw_rank[key])
         title = doc.get("title")
-        card_meta_score = _card_meta_score(doc.get("metadata") or {}, card_values)
+        meta = doc.get("metadata") or {}
+        card_meta_score = _card_meta_score(meta, card_values)
         title_score = _title_match_score(title, card_terms, 2)
         title_score += _title_match_score(title, rank_terms, 1)
         title_score += _title_match_score(title, query_terms, QUERY_TITLE_WEIGHT)
         title_score += _content_match_score(doc.get("content") or "", query_terms, QUERY_CONTENT_WEIGHT)
-        title_score += card_meta_score
-        doc["card_meta_score"] = card_meta_score
-        doc["card_match"] = card_meta_score > 0 or _card_term_match(
+        card_match_base = card_meta_score > 0 or _card_term_match(
             title,
             doc.get("content") or "",
             card_terms,
         )
+        category_score = 0
+        issuance_bonus = 0
+        category_bonus = 0
+        if search_mode == "ISSUE":
+            issuance_bonus = _issuance_title_bonus(title, category_terms)
+        elif search_mode == "BENEFIT":
+            category_score = _category_match_score(meta, query_terms)
+            category_bonus = _category_title_bonus(title, category_terms)
+        if card_values and not card_match_base:
+            category_score = 0
+            issuance_bonus = 0
+            category_bonus = 0
+        reissue_penalty = 0
+        if title and "재발급" in title:
+            if wants_reissue:
+                reissue_penalty = REISSUE_TITLE_PENALTY
+            else:
+                reissue_penalty = -REISSUE_TITLE_PENALTY
+        title_score += category_score
+        title_score += issuance_bonus
+        title_score += category_bonus
+        title_score += reissue_penalty
+        title_score += card_meta_score
+        doc["card_meta_score"] = card_meta_score
+        doc["issuance_bonus"] = issuance_bonus
+        doc["category_bonus"] = category_bonus
+        doc["reissue_penalty"] = reissue_penalty
+        if card_values:
+            doc["card_match"] = card_match_base
+        else:
+            doc["card_match"] = True
         final_score = rrf_score + (title_score * TITLE_SCORE_WEIGHT)
         doc["score"] = final_score
         doc["rrf_score"] = rrf_score
@@ -461,6 +666,9 @@ def _build_search_context(
     weak_terms = _expand_weak_terms(_as_list(filters.get("weak_intent")))
     payment_terms = _expand_payment_terms(_as_list(filters.get("payment_method")))
     query_terms = _extract_query_terms(query)
+    category_terms = _extract_category_terms([*query_terms, *weak_terms, *intent_terms])
+    search_mode = _select_search_mode([*category_terms, *query_terms, *weak_terms, *intent_terms])
+    wants_reissue = any(term in REISSUE_TERMS for term in [*query_terms, *intent_terms])
     rank_terms = _unique_in_order([*intent_terms, *payment_terms, *weak_terms, *query_terms])
     payment_only = bool(payment_terms) and not card_terms and not intent_terms
     payment_norm = {term.lower().replace(" ", "") for term in payment_terms}
@@ -479,6 +687,9 @@ def _build_search_context(
         "weak_terms": weak_terms,
         "payment_terms": payment_terms,
         "query_terms": query_terms,
+        "category_terms": category_terms,
+        "search_mode": search_mode,
+        "wants_reissue": wants_reissue,
         "rank_terms": rank_terms,
         "payment_only": payment_only,
         "extra_terms": extra_terms,
@@ -494,9 +705,21 @@ def _keyword_rows(
     context: Dict[str, object],
     limit: int,
 ) -> List[Tuple[object, str, Dict[str, object], float]]:
-    if not context["payment_only"] or not context["extra_terms"]:
+    search_mode = context.get("search_mode", "GENERAL")
+    if table == "guide_tbl":
+        if search_mode != "ISSUE":
+            return []
+    else:
+        if not (context.get("payment_only") or search_mode in {"ISSUE", "BENEFIT"}):
+            return []
+    extra_terms: List[str] = list(context.get("extra_terms") or [])
+    if context.get("category_terms"):
+        extra_terms.extend(context["category_terms"])
+    extra_terms = _unique_in_order(extra_terms)
+    extra_terms = [term for term in extra_terms if term not in KEYWORD_STOPWORDS]
+    if not extra_terms:
         return []
-    return text_search(table=table, terms=context["extra_terms"], limit=limit)
+    return text_search(table=table, terms=extra_terms, limit=limit, filters=context.get("filters"))
 
 
 def _collect_candidates(
@@ -513,6 +736,9 @@ def _collect_candidates(
         card_terms=context["card_terms"],
         rank_terms=context["rank_terms"],
         query_terms=context["query_terms"],
+        category_terms=context["category_terms"],
+        search_mode=context.get("search_mode", "GENERAL"),
+        wants_reissue=bool(context.get("wants_reissue")),
     )
 
 
@@ -539,6 +765,7 @@ def _finalize_candidates(
     return docs
 
 
+# --- 공개 검색 API ---
 async def retrieve_docs(
     query: str,
     routing: Dict[str, object],
@@ -565,12 +792,51 @@ async def retrieve_multi(
 
     for table in tables:
         safe_table = _safe_table(table)
-        rows = vector_search(context["query_text"], table=safe_table, limit=fetch_k, filters=context["filters"])
+        rows: List[Tuple[object, str, Dict[str, object], float]] = []
+        if safe_table == "card_tbl" and context.get("category_terms"):
+            category_filters = dict(context["filters"])
+            category_filters["category"] = context["category_terms"]
+            rows = vector_search(
+                context["query_text"],
+                table=safe_table,
+                limit=fetch_k,
+                filters=category_filters,
+            )
+            if not rows:
+                rows = vector_search(
+                    context["query_text"],
+                    table=safe_table,
+                    limit=fetch_k,
+                    filters=context["filters"],
+                )
+        else:
+            rows = vector_search(
+                context["query_text"],
+                table=safe_table,
+                limit=fetch_k,
+                filters=context["filters"],
+            )
+        if (
+            safe_table == "card_tbl"
+            and context.get("category_terms")
+            and context.get("search_mode") in {"ISSUE", "BENEFIT"}
+        ):
+            priority_terms = _priority_terms(context["category_terms"])
+            if priority_terms:
+                rows.extend(
+                    text_search(
+                        table=safe_table,
+                        terms=priority_terms,
+                        limit=fetch_k,
+                        filters=context.get("filters"),
+                    )
+                )
         if (
             safe_table == "card_tbl"
             and context["card_terms"]
             and not context["intent_terms"]
             and not context["payment_terms"]
+            and not context.get("category_terms")
         ):
             loose_filters = dict(context["filters"])
             loose_filters.pop("card_name", None)

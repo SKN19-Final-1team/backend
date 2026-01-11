@@ -12,6 +12,23 @@ MIN_BODY_CHARS = 60
 DEFAULT_SOURCES_HEADER = "[출처]"
 MAX_CARD_DOC_CHARS = 1200
 _WS_RE = re.compile(r"\s+")
+_TIME_PATTERNS = [
+    re.compile(r"\b\d{1,2}:\d{2}\s*[~-]\s*\d{1,2}:\d{2}\b"),
+    re.compile(r"\b\d+\s*[~-]\s*\d+\s*영업일\b"),
+    re.compile(r"\b\d+\s*영업일\b"),
+    re.compile(r"\b약\s*\d+\s*(분|시간)\b"),
+    re.compile(r"\b\d+\s*(분|시간)\b"),
+]
+_SYSTEM_PATH_RE = re.compile(r"[가-힣A-Za-z0-9\\s]+(?:>\\s*[가-힣A-Za-z0-9\\s]+){2,}")
+_EXCEPTION_START = ("단,", "다만", "예외", "주의")
+_EXCEPTION_PATTERNS = (
+    re.compile(r"^단,\\s*.+"),
+    re.compile(r"^다만\\s*.+"),
+    re.compile(r"^예외\\s*.*"),
+    re.compile(r"^주의\\s*.*"),
+    re.compile(r".+\\b제외\\b.+"),
+    re.compile(r".+\\b불가\\b.+"),
+)
 
 
 def build_context(docs: List[Dict[str, Any]], max_chars: int = DEFAULT_MAX_CONTEXT_CHARS) -> str:
@@ -109,6 +126,57 @@ def _filter_list_items(items: Any, content: str) -> List[str]:
             continue
         if _in_doc(value, content):
             out.append(item)
+    return out
+
+
+def _extract_time(content: str) -> str:
+    if not content:
+        return ""
+    for pattern in _TIME_PATTERNS:
+        match = pattern.search(content)
+        if match:
+            return match.group(0)
+    return ""
+
+
+def _extract_system_path(content: str) -> str:
+    if not content:
+        return ""
+    match = _SYSTEM_PATH_RE.search(content)
+    if not match:
+        return ""
+    return match.group(0).strip()
+
+
+def _extract_exceptions(content: str) -> List[str]:
+    if not content:
+        return []
+    lines: List[str] = []
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if len(line) > 180:
+            continue
+        if " - " in line:
+            parts = [part.strip() for part in line.split(" - ") if part.strip()]
+        else:
+            parts = [line]
+        for part in parts:
+            if len(part) > 160:
+                continue
+            if part.startswith(_EXCEPTION_START):
+                lines.append(part)
+                continue
+            if any(pattern.search(part) for pattern in _EXCEPTION_PATTERNS):
+                lines.append(part)
+    seen = set()
+    out = []
+    for item in lines:
+        if item in seen:
+            continue
+        seen.add(item)
+        out.append(item)
     return out
 
 
@@ -240,6 +308,18 @@ def generate_detail_cards(
             value = merged.get(field)
             if not isinstance(value, str) or not _in_doc(value, content):
                 merged[field] = ""
+        if not merged.get("time"):
+            extracted_time = _extract_time(content)
+            if extracted_time:
+                merged["time"] = extracted_time
+        if not merged.get("systemPath"):
+            extracted_path = _extract_system_path(content)
+            if extracted_path:
+                merged["systemPath"] = extracted_path
+        if not merged.get("exceptions"):
+            extracted_exceptions = _extract_exceptions(content)
+            if extracted_exceptions:
+                merged["exceptions"] = extracted_exceptions
         out.append(merged)
     return out, guidance_script or ""
 
