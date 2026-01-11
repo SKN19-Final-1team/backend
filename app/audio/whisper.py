@@ -2,21 +2,10 @@ import threading
 import queue
 import io
 import asyncio
-import ahocorasick
 from openai import OpenAI
 from dotenv import load_dotenv
 
 load_dotenv()
-
-KEYWORD_MAP = {
-    "카드 분실": "분실 신고 접수",
-    "분실": "분실 신고 접수",
-    "한도 조회": "한도 상향 안내",
-    "결제일": "결제일 변경 안내",
-    "비밀번호": "비밀번호 재설정",
-    "연체": "분할 납부 안내"
-}
-
 
 class WhisperService:
     def __init__(self, api_key: str = None):
@@ -27,12 +16,6 @@ class WhisperService:
         self.thread = None
         self.loop = None
         self.callback = None
-
-        # ahocorasick 오토마톤 초기화
-        self.automaton = ahocorasick.Automaton()
-        for key in KEYWORD_MAP.keys():
-            self.automaton.add_word(key, key)
-        self.automaton.make_automaton()
 
     def start(self, callback, loop: asyncio.AbstractEventLoop):
         # 백그라운드 작업
@@ -52,15 +35,6 @@ class WhisperService:
     def add_audio(self, audio_data: bytes):
         # 오디오 데이터 추가
         self.queue.put(audio_data)
-
-    def _find_keyword(self, text):
-        for end_index, found_keyword in self.automaton.iter(text):
-            next_keyword = KEYWORD_MAP.get(found_keyword)
-            return {
-                "current": found_keyword,
-                "next": next_keyword
-            }
-        return None
 
     def _worker(self):
         print("작업 스레드 시작")
@@ -84,12 +58,10 @@ class WhisperService:
                 )
                 text = transcript.text.strip()
 
-                keyword_info = self._find_keyword(text)
-
                 # 비동기 콜백 함수를 메인 스케줄러에 등록
                 if text and self.callback:
                     asyncio.run_coroutine_threadsafe(
-                        self.callback(text, keyword_info), 
+                        self.callback(text), 
                         self.loop
                     )
 

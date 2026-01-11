@@ -9,9 +9,9 @@ from dotenv import load_dotenv
 from pgvector import Vector
 from pgvector.psycopg2 import register_vector
 
-from app.llm.base import get_openai_client
-from app.rag.router import route_query as _route_query
-from app.rag.vocab.rules import ACTION_SYNONYMS, CARD_NAME_SYNONYMS, PAYMENT_SYNONYMS, STOPWORDS, WEAK_INTENT_SYNONYMS
+from llm.base import get_openai_client
+from rag.router import route_query as _route_query
+from rag.vocab.rules import ACTION_SYNONYMS, CARD_NAME_SYNONYMS, PAYMENT_SYNONYMS, STOPWORDS, WEAK_INTENT_SYNONYMS
 
 load_dotenv()
 

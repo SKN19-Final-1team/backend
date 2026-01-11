@@ -4,7 +4,7 @@ from typing import Dict, List, Optional
 from flashtext import KeywordProcessor
 
 # vocab 규칙 정의
-from app.rag.vocab.rules import (
+from rag.vocab.rules import (
     ACTION_ALLOWLIST,
     ACTION_SYNONYMS,
     CARD_NAME_SYNONYMS,

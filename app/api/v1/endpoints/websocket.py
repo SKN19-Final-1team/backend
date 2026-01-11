@@ -2,6 +2,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 import asyncio
 import uuid
 from audio.whisper import WhisperService 
+from rag.pipeline import RAGConfig, run_rag
 
 router = APIRouter()
 
@@ -14,11 +15,17 @@ async def websocket_endpoint(websocket: WebSocket):
     whisper_service = WhisperService()
 
     # 결과 처리 콜백
-    async def on_transcription_result(text: str, keyword_data: dict):
-        print(f"[{session_id}] STT 결과: {text}")
+    async def on_transcription_result(text: str):
+        print(f"[{session_id}] STT 결과 : {text}")
 
-        if keyword_data:
-            print(f"[{session_id}] 키워드 감지 : {keyword_data}")
+        try:
+            result = await run_rag(text, config=RAGConfig(top_k=4, normalize_keywords=True))
+            
+            if result:
+                print(f"[{session_id}] RAG 검색 결과 : {result}")
+                
+        except Exception as e:
+            print(f"[{session_id}] RAG 처리 중 에러 : {e}")
 
     # 서비스 시작
     loop = asyncio.get_running_loop()

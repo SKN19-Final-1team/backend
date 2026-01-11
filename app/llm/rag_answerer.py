@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import json
 import re
 
-from app.llm.base import get_openai_client
+from llm.base import get_openai_client
 
 DEFAULT_MODEL = "gpt-4.1"
 DEFAULT_TEMPERATURE = 0.2

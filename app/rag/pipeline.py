@@ -2,10 +2,10 @@ from dataclasses import dataclass
 import re
 from typing import Any, Dict, List, Optional
 
-from app.llm.rag_answerer import generate_answer, generate_detail_cards
-from app.rag.retriever import retrieve_docs, retrieve_multi
-from app.rag.router import route_query
-from app.rag.vocab.rules import STOPWORDS
+from llm.rag_answerer import generate_answer, generate_detail_cards
+from rag.retriever import retrieve_docs, retrieve_multi
+from rag.router import route_query
+from rag.vocab.rules import STOPWORDS
 
 
 # --- 설정 ---
