@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 import os
@@ -13,45 +14,31 @@ from pgvector.psycopg2 import register_vector
 
 from app.llm.base import get_openai_client
 from app.rag.router import route_query as _route_query
+from app.rag.retriever_config import (
+    BENEFIT_TERMS,
+    CARD_META_WEIGHT,
+    CATEGORY_MATCH_TOKENS,
+    CATEGORY_TITLE_BONUS,
+    CATEGORY_TITLE_DEMOTE,
+    ISSUE_TERMS,
+    ISSUANCE_HINT_TOKENS,
+    ISSUANCE_TITLE_BONUS,
+    ISSUANCE_TITLE_DEMOTE,
+    KEYWORD_STOPWORDS,
+    MIN_GUIDE_CONTENT_LEN,
+    PRIORITY_TERMS_BY_CATEGORY,
+    QUERY_CONTENT_WEIGHT,
+    QUERY_TITLE_WEIGHT,
+    REISSUE_TERMS,
+    REISSUE_TITLE_PENALTY,
+    RRF_K,
+    TITLE_SCORE_WEIGHT,
+)
 from app.rag.vocab.rules import ACTION_SYNONYMS, CARD_NAME_SYNONYMS, PAYMENT_SYNONYMS, STOPWORDS, WEAK_INTENT_SYNONYMS
 
 load_dotenv()
 
-RRF_K = 60
-QUERY_TITLE_WEIGHT = 2
-QUERY_CONTENT_WEIGHT = 1
-CARD_META_WEIGHT = 3
-TITLE_SCORE_WEIGHT = 0.001
-ISSUANCE_HINT_TOKENS = ("발급", "신청", "재발급", "대상", "서류")
-CATEGORY_MATCH_TOKENS = ("발급", "신청", "재발급", "대상", "서류", "적립", "혜택")
-ISSUANCE_TITLE_BONUS = {
-    "발급 대상": 6,
-    "발급": 4,
-    "신청": 3,
-    "구비": 2,
-    "서류": 2,
-    "신규": 2,
-}
-ISSUANCE_TITLE_DEMOTE = ("유의사항", "공통 제외", "적립", "혜택")
-CATEGORY_TITLE_BONUS = {
-    "적립 서비스": 4,
-    "일상 생활비": 3,
-    "필수 생활비": 3,
-    "포인트 적립": 2,
-}
-CATEGORY_TITLE_DEMOTE = ("유의사항", "공통 제외")
-KEYWORD_STOPWORDS = {"카드"}
-PRIORITY_TERMS_BY_CATEGORY = {
-    "발급": ["발급 대상"],
-    "신청": ["발급 대상"],
-    "재발급": ["발급 대상"],
-    "적립": ["적립 서비스", "일상 생활비 적립", "필수 생활비 적립", "포인트 적립"],
-}
-ISSUE_TERMS = {"발급", "신청", "재발급", "대상", "서류"}
-BENEFIT_TERMS = {"적립", "혜택", "할인", "포인트"}
-REISSUE_TERMS = {"재발급", "재발행"}
-REISSUE_TITLE_PENALTY = 4
-MIN_GUIDE_CONTENT_LEN = 60
+LOG_RETRIEVER_DEBUG = os.getenv("RAG_LOG_RETRIEVER_DEBUG") == "1"
 _DB_POOL_ENABLED = os.getenv("RAG_DB_POOL", "1") != "0"
 _DB_POOL: Optional[pg_pool.ThreadedConnectionPool] = None
 _DB_POOL_LOCK = threading.Lock()
@@ -638,10 +625,28 @@ def _build_candidates_from_rows(
     return candidates
 
 
+@dataclass(frozen=True)
+class SearchContext:
+    query_text: str
+    filters: Dict[str, object]
+    card_values: List[str]
+    card_terms: List[str]
+    intent_terms: List[str]
+    weak_terms: List[str]
+    payment_terms: List[str]
+    query_terms: List[str]
+    category_terms: List[str]
+    search_mode: str
+    wants_reissue: bool
+    rank_terms: List[str]
+    payment_only: bool
+    extra_terms: List[str]
+
+
 def _build_search_context(
     query: str,
     routing: Dict[str, object],
-) -> Dict[str, object]:
+) -> SearchContext:
     query_text = _build_query_text(query, routing.get("query_template"))
     filters = routing.get("filters") or {}
 
@@ -663,22 +668,22 @@ def _build_search_context(
         if term.lower().replace(" ", "") not in payment_norm
     ]
 
-    return {
-        "query_text": query_text,
-        "filters": filters,
-        "card_values": card_values,
-        "card_terms": card_terms,
-        "intent_terms": intent_terms,
-        "weak_terms": weak_terms,
-        "payment_terms": payment_terms,
-        "query_terms": query_terms,
-        "category_terms": category_terms,
-        "search_mode": search_mode,
-        "wants_reissue": wants_reissue,
-        "rank_terms": rank_terms,
-        "payment_only": payment_only,
-        "extra_terms": extra_terms,
-    }
+    return SearchContext(
+        query_text=query_text,
+        filters=filters,
+        card_values=card_values,
+        card_terms=card_terms,
+        intent_terms=intent_terms,
+        weak_terms=weak_terms,
+        payment_terms=payment_terms,
+        query_terms=query_terms,
+        category_terms=category_terms,
+        search_mode=search_mode,
+        wants_reissue=wants_reissue,
+        rank_terms=rank_terms,
+        payment_only=payment_only,
+        extra_terms=extra_terms,
+    )
 
 
 def _fetch_k(top_k: int) -> int:
@@ -687,43 +692,43 @@ def _fetch_k(top_k: int) -> int:
 
 def _keyword_rows(
     table: str,
-    context: Dict[str, object],
+    context: SearchContext,
     limit: int,
 ) -> List[Tuple[object, str, Dict[str, object], float]]:
-    search_mode = context.get("search_mode", "GENERAL")
+    search_mode = context.search_mode
     if table == "guide_tbl":
         if search_mode != "ISSUE":
             return []
     else:
-        if not (context.get("payment_only") or search_mode in {"ISSUE", "BENEFIT"}):
+        if not (context.payment_only or search_mode in {"ISSUE", "BENEFIT"}):
             return []
-    extra_terms: List[str] = list(context.get("extra_terms") or [])
-    if context.get("category_terms"):
-        extra_terms.extend(context["category_terms"])
+    extra_terms: List[str] = list(context.extra_terms)
+    if context.category_terms:
+        extra_terms.extend(context.category_terms)
     extra_terms = _unique_in_order(extra_terms)
     extra_terms = [term for term in extra_terms if term not in KEYWORD_STOPWORDS]
     if not extra_terms:
         return []
-    return text_search(table=table, terms=extra_terms, limit=limit, filters=context.get("filters"))
+    return text_search(table=table, terms=extra_terms, limit=limit, filters=context.filters)
 
 
 def _collect_candidates(
     table: str,
     vec_rows: List[Tuple[object, str, Dict[str, object], float]],
-    context: Dict[str, object],
+    context: SearchContext,
     limit: int,
 ) -> List[Tuple[int, float, Dict[str, object]]]:
     return _build_candidates_from_rows(
         vec_rows=vec_rows,
         kw_rows=_keyword_rows(table, context, limit),
         table=table,
-        card_values=context["card_values"],
-        card_terms=context["card_terms"],
-        rank_terms=context["rank_terms"],
-        query_terms=context["query_terms"],
-        category_terms=context["category_terms"],
-        search_mode=context.get("search_mode", "GENERAL"),
-        wants_reissue=bool(context.get("wants_reissue")),
+        card_values=context.card_values,
+        card_terms=context.card_terms,
+        rank_terms=context.rank_terms,
+        query_terms=context.query_terms,
+        category_terms=context.category_terms,
+        search_mode=context.search_mode,
+        wants_reissue=context.wants_reissue,
     )
 
 
@@ -778,61 +783,76 @@ async def retrieve_multi(
     for table in tables:
         safe_table = _safe_table(table)
         rows: List[Tuple[object, str, Dict[str, object], float]] = []
-        if safe_table == "card_tbl" and context.get("category_terms"):
-            category_filters = dict(context["filters"])
-            category_filters["category"] = context["category_terms"]
+        if safe_table == "card_tbl" and context.category_terms:
+            category_filters = dict(context.filters)
+            category_filters["category"] = context.category_terms
             rows = vector_search(
-                context["query_text"],
+                context.query_text,
                 table=safe_table,
                 limit=fetch_k,
                 filters=category_filters,
             )
             if not rows:
                 rows = vector_search(
-                    context["query_text"],
+                    context.query_text,
                     table=safe_table,
                     limit=fetch_k,
-                    filters=context["filters"],
+                    filters=context.filters,
                 )
         else:
             rows = vector_search(
-                context["query_text"],
+                context.query_text,
                 table=safe_table,
                 limit=fetch_k,
-                filters=context["filters"],
+                filters=context.filters,
             )
         if (
             safe_table == "card_tbl"
-            and context.get("category_terms")
-            and context.get("search_mode") in {"ISSUE", "BENEFIT"}
+            and context.category_terms
+            and context.search_mode in {"ISSUE", "BENEFIT"}
         ):
-            priority_terms = _priority_terms(context["category_terms"])
+            priority_terms = _priority_terms(context.category_terms)
             if priority_terms:
                 rows.extend(
                     text_search(
                         table=safe_table,
                         terms=priority_terms,
                         limit=fetch_k,
-                        filters=context.get("filters"),
+                        filters=context.filters,
                     )
                 )
         if (
             safe_table == "card_tbl"
-            and context["card_terms"]
-            and not context["intent_terms"]
-            and not context["payment_terms"]
-            and not context.get("category_terms")
+            and context.card_terms
+            and not context.intent_terms
+            and not context.payment_terms
+            and not context.category_terms
         ):
-            loose_filters = dict(context["filters"])
+            loose_filters = dict(context.filters)
             loose_filters.pop("card_name", None)
-            loose_rows = vector_search(context["query_text"], table=safe_table, limit=fetch_k, filters=loose_filters)
+            loose_rows = vector_search(context.query_text, table=safe_table, limit=fetch_k, filters=loose_filters)
             if loose_rows:
                 rows.extend(loose_rows)
-        candidates.extend(_collect_candidates(safe_table, rows, context, fetch_k))
+        table_candidates = _collect_candidates(safe_table, rows, context, fetch_k)
+        candidates.extend(table_candidates)
+        if LOG_RETRIEVER_DEBUG:
+            print(
+                "[retriever] "
+                f"table={safe_table} vec_rows={len(rows)} "
+                f"cand_added={len(table_candidates)} total_cand={len(candidates)}"
+            )
 
     def _doc_key(doc: Dict[str, object]) -> str:
         title = doc.get("title")
         return title if title else f"__no_title__{doc.get('table')}:{doc.get('id')}"
 
     docs = _finalize_candidates(candidates, _doc_key)
+    if LOG_RETRIEVER_DEBUG and docs:
+        top = docs[0]
+        print(
+            "[retriever] "
+            f"top_title={top.get('title')} "
+            f"score={top.get('score')} rrf={top.get('rrf_score')} "
+            f"title_score={top.get('title_score')}"
+        )
     return docs[:top_k]

@@ -19,6 +19,13 @@ DB_NAME=
 
 # 모델 파일을 저장할 로컬 폴더 경로
 MODEL_CACHE_DIR=./model_cache
+
+# RAG 카드 캐시 (옵션)
+# Redis 미설정 시 메모리 캐시만 사용됩니다.
+RAG_CARD_CACHE=1
+RAG_CARD_CACHE_TTL=120
+RAG_REDIS_URL=redis://localhost:6379/0
+RAG_CARD_PROMPT_VERSION=v2-content-only
 ```
 
 ## 실행 방법

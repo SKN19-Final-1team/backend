@@ -20,7 +20,7 @@
     "expect_should_route": true
   },
   {
-    "query": "K-패스 혜택 안내",
+    "query": "K-패스 혜택 뭐 있어요?",
     "expect_route": "card_info",
     "expect_should_route": true
   },
