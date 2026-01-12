@@ -1,10 +1,12 @@
+from contextlib import contextmanager
 from typing import Dict, List, Optional, Tuple
 
 import os
 import re
-import json
+import threading
 
 import psycopg2
+from psycopg2 import pool as pg_pool
 from dotenv import load_dotenv
 from pgvector import Vector
 from pgvector.psycopg2 import register_vector
@@ -50,7 +52,9 @@ BENEFIT_TERMS = {"적립", "혜택", "할인", "포인트"}
 REISSUE_TERMS = {"재발급", "재발행"}
 REISSUE_TITLE_PENALTY = 4
 MIN_GUIDE_CONTENT_LEN = 60
-_BROKEN_JSON_RE = re.compile(r"\}\s*,\s*\{")
+_DB_POOL_ENABLED = os.getenv("RAG_DB_POOL", "1") != "0"
+_DB_POOL: Optional[pg_pool.ThreadedConnectionPool] = None
+_DB_POOL_LOCK = threading.Lock()
 
 
 # --- 라우터 진입점 ---
@@ -178,11 +182,6 @@ def _is_noisy_guide_doc(title: Optional[str], content: str) -> bool:
         return True
     if not content or len(content.strip()) < MIN_GUIDE_CONTENT_LEN:
         return True
-    if _BROKEN_JSON_RE.search(content):
-        return True
-    stripped = content.lstrip()
-    if stripped.startswith(("}", "]")):
-        return True
     return False
 
 
@@ -292,32 +291,6 @@ def _extract_query_terms(query: str) -> List[str]:
 
 
 # --- 콘텐츠 정규화 ---
-def _parse_json_content(content: str) -> Dict[str, object]:
-    if not content:
-        return {}
-    text = content.lstrip()
-    if text.startswith("{") or text.startswith("["):
-        try:
-            data = json.loads(text)
-            if isinstance(data, list):
-                data = data[0] if data else {}
-            if isinstance(data, dict):
-                return data
-        except Exception:
-            return {}
-    return {}
-
-
-def _extract_json_value(content: str, key: str) -> Optional[str]:
-    if not content:
-        return None
-    match = re.search(rf'"{re.escape(key)}"\\s*:\\s*"([^"]+)"', content)
-    if not match:
-        return None
-    value = match.group(1)
-    return value.replace("\\n", "\n")
-
-
 def _normalize_doc_fields(
     content: str,
     metadata: Optional[object],
@@ -325,34 +298,6 @@ def _normalize_doc_fields(
     meta = metadata if isinstance(metadata, dict) else {}
     title = meta.get("title")
     normalized_content = content or ""
-    id_candidate: Optional[str] = None
-
-    if not title:
-        parsed = _parse_json_content(normalized_content)
-        if parsed:
-            if not title:
-                title = parsed.get("title") or (parsed.get("metadata") or {}).get("title")
-            if not id_candidate:
-                id_candidate = parsed.get("id") or (parsed.get("metadata") or {}).get("id")
-            body = parsed.get("content") or parsed.get("text")
-            if isinstance(body, str) and body:
-                normalized_content = body
-            parsed_meta = parsed.get("metadata")
-            if isinstance(parsed_meta, dict):
-                meta = {**parsed_meta, **meta}
-        else:
-            title = _extract_json_value(normalized_content, "title") or title
-            body = _extract_json_value(normalized_content, "content")
-            if not body:
-                body = _extract_json_value(normalized_content, "text")
-            if body:
-                normalized_content = body
-            if not id_candidate:
-                id_candidate = _extract_json_value(normalized_content, "id")
-
-    if not meta.get("id") and id_candidate:
-        meta["id"] = id_candidate
-
     return title, normalized_content, meta
 
 
@@ -446,6 +391,39 @@ def _db_config() -> Dict[str, object]:
     return cfg
 
 
+def _db_pool() -> Optional[pg_pool.ThreadedConnectionPool]:
+    global _DB_POOL
+    if not _DB_POOL_ENABLED:
+        return None
+    if _DB_POOL is None:
+        with _DB_POOL_LOCK:
+            if _DB_POOL is None:
+                minconn = int(os.getenv("RAG_DB_POOL_MIN", "1"))
+                maxconn = int(os.getenv("RAG_DB_POOL_MAX", "4"))
+                _DB_POOL = pg_pool.ThreadedConnectionPool(minconn, maxconn, **_db_config())
+    return _DB_POOL
+
+
+@contextmanager
+def _db_conn():
+    db_pool = _db_pool()
+    if db_pool is None:
+        conn = psycopg2.connect(**_db_config())
+        try:
+            yield conn
+        finally:
+            conn.close()
+        return
+    conn = db_pool.getconn()
+    try:
+        yield conn
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            db_pool.putconn(conn)
+
+
 def _safe_table(name: str) -> str:
     if name not in ("card_tbl", "guide_tbl"):
         raise ValueError(f"Unsupported table: {name}")
@@ -475,7 +453,7 @@ def vector_search(
     table = _safe_table(table)
     emb = Vector(embed_query(query))
     where_sql, where_params = build_where_clause(filters, table)
-    with psycopg2.connect(**_db_config()) as conn:
+    with _db_conn() as conn:
         register_vector(conn)
         with conn.cursor() as cur:
             def _run(where_sql: str, where_params: List[str]):
@@ -534,7 +512,7 @@ def text_search(
             params.extend(card_values)
     if not where_sql:
         return []
-    with psycopg2.connect(**_db_config()) as conn:
+    with _db_conn() as conn:
         with conn.cursor() as cur:
             sql = f"SELECT id, content, metadata, 0.0 AS score FROM {table} WHERE {where_sql} LIMIT %s"
             params.append(limit)

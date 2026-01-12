@@ -1,34 +1,26 @@
 from typing import Any, Dict, List, Optional, Tuple
 
 import json
-import re
+import time
 
 from app.llm.base import get_openai_client
+from openai import (
+    APIConnectionError,
+    APITimeoutError,
+    APIStatusError,
+    BadRequestError,
+    InternalServerError,
+    RateLimitError,
+    UnprocessableEntityError,
+)
 
-DEFAULT_MODEL = "gpt-4.1"
+DEFAULT_MODEL = "gpt-4.1-mini"
 DEFAULT_TEMPERATURE = 0.2
 DEFAULT_MAX_CONTEXT_CHARS = 1600
 MIN_BODY_CHARS = 60
 DEFAULT_SOURCES_HEADER = "[출처]"
 MAX_CARD_DOC_CHARS = 1200
-_WS_RE = re.compile(r"\s+")
-_TIME_PATTERNS = [
-    re.compile(r"\b\d{1,2}:\d{2}\s*[~-]\s*\d{1,2}:\d{2}\b"),
-    re.compile(r"\b\d+\s*[~-]\s*\d+\s*영업일\b"),
-    re.compile(r"\b\d+\s*영업일\b"),
-    re.compile(r"\b약\s*\d+\s*(분|시간)\b"),
-    re.compile(r"\b\d+\s*(분|시간)\b"),
-]
-_SYSTEM_PATH_RE = re.compile(r"[가-힣A-Za-z0-9\\s]+(?:>\\s*[가-힣A-Za-z0-9\\s]+){2,}")
-_EXCEPTION_START = ("단,", "다만", "예외", "주의")
-_EXCEPTION_PATTERNS = (
-    re.compile(r"^단,\\s*.+"),
-    re.compile(r"^다만\\s*.+"),
-    re.compile(r"^예외\\s*.*"),
-    re.compile(r"^주의\\s*.*"),
-    re.compile(r".+\\b제외\\b.+"),
-    re.compile(r".+\\b불가\\b.+"),
-)
+CARD_RETRY_BACKOFF_SEC = 0.6
 
 
 def build_context(docs: List[Dict[str, Any]], max_chars: int = DEFAULT_MAX_CONTEXT_CHARS) -> str:
@@ -67,7 +59,7 @@ def format_sources(
     lines = []
     for idx, doc in enumerate(docs, 1):
         title = doc.get("title") or "(no title)"
-        meta = doc.get("metadata") if isinstance(doc.get("metadata"), dict) else {}
+        meta = doc.get("metadata") or {}
         source_id = meta.get("id") or doc.get("id")
         if source_id:
             lines.append(f"- [{idx}] {title} ({source_id})")
@@ -86,11 +78,11 @@ def _truncate(text: str, limit: int) -> str:
 
 def _base_card(doc: Dict[str, Any]) -> Dict[str, Any]:
     content = doc.get("content") or ""
-    meta = doc.get("metadata") if isinstance(doc.get("metadata"), dict) else {}
+    meta = doc.get("metadata") or {}
     card_id = meta.get("id") or doc.get("id") or ""
     return {
         "id": str(card_id),
-        "title": doc.get("title") or "",
+        "title": doc.get("title") or meta.get("title") or "",
         "keywords": [],
         "content": _truncate(content, 140),
         "systemPath": "",
@@ -102,82 +94,6 @@ def _base_card(doc: Dict[str, Any]) -> Dict[str, Any]:
         "note": "",
         "relevanceScore": float(doc.get("score") or 0.0),
     }
-
-
-def _normalize_for_match(text: str) -> str:
-    return _WS_RE.sub(" ", text.strip().lower())
-
-
-def _in_doc(text: str, content: str) -> bool:
-    if not text or not content:
-        return False
-    return _normalize_for_match(text) in _normalize_for_match(content)
-
-
-def _filter_list_items(items: Any, content: str) -> List[str]:
-    if not isinstance(items, list):
-        return []
-    out: List[str] = []
-    for item in items:
-        if not isinstance(item, str):
-            continue
-        value = item.strip()
-        if not value:
-            continue
-        if _in_doc(value, content):
-            out.append(item)
-    return out
-
-
-def _extract_time(content: str) -> str:
-    if not content:
-        return ""
-    for pattern in _TIME_PATTERNS:
-        match = pattern.search(content)
-        if match:
-            return match.group(0)
-    return ""
-
-
-def _extract_system_path(content: str) -> str:
-    if not content:
-        return ""
-    match = _SYSTEM_PATH_RE.search(content)
-    if not match:
-        return ""
-    return match.group(0).strip()
-
-
-def _extract_exceptions(content: str) -> List[str]:
-    if not content:
-        return []
-    lines: List[str] = []
-    for raw_line in content.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        if len(line) > 180:
-            continue
-        if " - " in line:
-            parts = [part.strip() for part in line.split(" - ") if part.strip()]
-        else:
-            parts = [line]
-        for part in parts:
-            if len(part) > 160:
-                continue
-            if part.startswith(_EXCEPTION_START):
-                lines.append(part)
-                continue
-            if any(pattern.search(part) for pattern in _EXCEPTION_PATTERNS):
-                lines.append(part)
-    seen = set()
-    out = []
-    for item in lines:
-        if item in seen:
-            continue
-        seen.add(item)
-        out.append(item)
-    return out
 
 
 def _build_card_prompt(query: str, docs: List[Dict[str, Any]]) -> str:
@@ -242,48 +158,76 @@ def _parse_cards_payload(text: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _is_response_format_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    if "response_format" in message or "json_object" in message:
+        return True
+    if isinstance(exc, (BadRequestError, UnprocessableEntityError)):
+        return True
+    return False
+
+
+def _is_transient_error(exc: Exception) -> bool:
+    if isinstance(exc, (APIConnectionError, APITimeoutError, RateLimitError, InternalServerError)):
+        return True
+    if isinstance(exc, APIStatusError):
+        status = getattr(exc, "status_code", None)
+        return bool(status and status >= 500)
+    return False
+
+
 def generate_detail_cards(
     query: str,
     docs: List[Dict[str, Any]],
     model: str = DEFAULT_MODEL,
     temperature: float = DEFAULT_TEMPERATURE,
+    max_llm_cards: Optional[int] = None,
 ) -> Tuple[List[Dict[str, Any]], str]:
     if not docs:
         return [], ""
     base_cards = [_base_card(doc) for doc in docs]
-    prompt = _build_card_prompt(query, docs)
+    llm_count = len(docs) if max_llm_cards is None else max(0, min(max_llm_cards, len(docs)))
+    if llm_count == 0:
+        return base_cards, ""
+    docs_for_llm = docs[:llm_count]
+    prompt = _build_card_prompt(query, docs_for_llm)
     client = get_openai_client()
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "너는 카드 상담 업무용 카드 생성기다. "
+                "문서 내용과 사용자 질문을 기반으로 카드 정보를 생성한다."
+            ),
+        },
+        {"role": "user", "content": prompt},
+    ]
     try:
         resp = client.chat.completions.create(
             model=model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "너는 카드 상담 업무용 카드 생성기다. "
-                        "문서 내용과 사용자 질문을 기반으로 카드 정보를 생성한다."
-                    ),
-                },
-                {"role": "user", "content": prompt},
-            ],
+            messages=messages,
             temperature=temperature,
             response_format={"type": "json_object"},
         )
-    except Exception:
-        resp = client.chat.completions.create(
-            model=model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "너는 카드 상담 업무용 카드 생성기다. "
-                        "문서 내용과 사용자 질문을 기반으로 카드 정보를 생성한다."
-                    ),
-                },
-                {"role": "user", "content": prompt},
-            ],
-            temperature=temperature,
-        )
+    except Exception as exc:
+        if _is_response_format_error(exc):
+            print("[cards] response_format failed:", repr(exc))
+            resp = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=temperature,
+            )
+        elif _is_transient_error(exc):
+            print("[cards] transient error, retrying:", repr(exc))
+            time.sleep(CARD_RETRY_BACKOFF_SEC)
+            resp = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=temperature,
+                response_format={"type": "json_object"},
+            )
+        else:
+            raise
     raw = resp.choices[0].message.content or ""
     payload = _parse_cards_payload(raw)
     if not payload:
@@ -293,34 +237,15 @@ def generate_detail_cards(
     if not isinstance(parsed, list):
         return base_cards, guidance_script or ""
 
-    out: List[Dict[str, Any]] = []
-    for idx, base in enumerate(base_cards):
+    out = list(base_cards)
+    for idx, base in enumerate(base_cards[:llm_count]):
         generated = parsed[idx] if idx < len(parsed) and isinstance(parsed[idx], dict) else {}
         merged = {**base, **generated}
         merged["id"] = base["id"]
         merged["title"] = base["title"]
         merged["detailContent"] = base["detailContent"]
         merged["relevanceScore"] = base["relevanceScore"]
-        content = base.get("detailContent") or ""
-        merged["requiredChecks"] = _filter_list_items(merged.get("requiredChecks"), content)
-        merged["exceptions"] = _filter_list_items(merged.get("exceptions"), content)
-        for field in ("note", "time", "regulation", "systemPath"):
-            value = merged.get(field)
-            if not isinstance(value, str) or not _in_doc(value, content):
-                merged[field] = ""
-        if not merged.get("time"):
-            extracted_time = _extract_time(content)
-            if extracted_time:
-                merged["time"] = extracted_time
-        if not merged.get("systemPath"):
-            extracted_path = _extract_system_path(content)
-            if extracted_path:
-                merged["systemPath"] = extracted_path
-        if not merged.get("exceptions"):
-            extracted_exceptions = _extract_exceptions(content)
-            if extracted_exceptions:
-                merged["exceptions"] = extracted_exceptions
-        out.append(merged)
+        out[idx] = merged
     return out, guidance_script or ""
 
 

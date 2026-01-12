@@ -1,5 +1,7 @@
 from dataclasses import dataclass
+import os
 import re
+import time
 from typing import Any, Dict, List, Optional
 
 from app.llm.rag_answerer import generate_answer, generate_detail_cards
@@ -7,17 +9,20 @@ from app.rag.retriever import retrieve_docs, retrieve_multi
 from app.rag.router import route_query
 from app.rag.vocab.rules import STOPWORDS
 
+LOG_TIMING = os.getenv("RAG_LOG_TIMING", "1") != "0"
+
 
 # --- 설정 ---
 @dataclass(frozen=True)
 class RAGConfig:
     top_k: int = 5
-    model: str = "gpt-4.1"
+    model: str = "gpt-4.1-mini"
     temperature: float = 0.2
     no_route_answer: str = "카드명/상황을 조금 더 구체적으로 말씀해 주세요."
     include_docs: bool = True
     normalize_keywords: bool = False
     strict_guidance_script: bool = True
+    llm_card_top_n: int = 3
 
 
 # --- 라우팅 ---
@@ -240,6 +245,10 @@ def _omit_empty(value: Any) -> Any:
     return value
 
 
+def _format_ms(seconds: float) -> str:
+    return f"{seconds * 1000:.1f}ms"
+
+
 # --- 검색 ---
 async def retrieve(
     query: str,
@@ -282,12 +291,22 @@ def answer(
 # --- 파이프라인 ---
 async def run_rag(query: str, config: Optional[RAGConfig] = None) -> Dict[str, Any]:
     cfg = config or RAGConfig()
+    t_start = time.perf_counter()
     routing = route(query)
+    t_route = time.perf_counter()
 
     should_search = routing.get("should_search")
     if should_search is None:
         should_search = routing.get("should_route")
     if not should_search:
+        if LOG_TIMING:
+            total = time.perf_counter() - t_start
+            print(
+                "[rag] "
+                f"route={_format_ms(t_route - t_start)} "
+                f"total={_format_ms(total)} "
+                f"should_search=False route={routing.get('route')}"
+            )
         return {
             "currentSituation": [],
             "nextStep": [],
@@ -297,6 +316,7 @@ async def run_rag(query: str, config: Optional[RAGConfig] = None) -> Dict[str, A
         }
 
     docs = await retrieve(query=query, routing=routing, top_k=cfg.top_k)
+    t_retrieve = time.perf_counter()
     if routing.get("route") == "card_info":
         docs = _promote_definition_doc(docs)
     cards, guidance_script = generate_detail_cards(
@@ -304,7 +324,9 @@ async def run_rag(query: str, config: Optional[RAGConfig] = None) -> Dict[str, A
         docs=docs,
         model=cfg.model,
         temperature=0.0,
+        max_llm_cards=cfg.llm_card_top_n,
     )
+    t_cards = time.perf_counter()
     if cfg.strict_guidance_script:
         guidance_script = _strict_guidance_script(guidance_script, docs)
     query_keywords = _collect_query_keywords(query, routing, cfg.normalize_keywords)
@@ -312,6 +334,19 @@ async def run_rag(query: str, config: Optional[RAGConfig] = None) -> Dict[str, A
         card["keywords"] = query_keywords
     cards = [_omit_empty(card) for card in cards]
     current_cards, next_cards = _split_cards_by_query(cards, query)
+    t_post = time.perf_counter()
+
+    if LOG_TIMING:
+        total = t_post - t_start
+        print(
+            "[rag] "
+            f"route={_format_ms(t_route - t_start)} "
+            f"retrieve={_format_ms(t_retrieve - t_route)} "
+            f"cards={_format_ms(t_cards - t_retrieve)} "
+            f"post={_format_ms(t_post - t_cards)} "
+            f"total={_format_ms(total)} "
+            f"docs={len(docs)} route={routing.get('route')}"
+        )
 
     response = {
         "currentSituation": current_cards,
