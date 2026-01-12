@@ -9,9 +9,9 @@ from dotenv import load_dotenv
 from pgvector import Vector
 from pgvector.psycopg2 import register_vector
 
-from llm.base import get_openai_client
-from rag.router import route_query as _route_query
-from rag.vocab.rules import ACTION_SYNONYMS, CARD_NAME_SYNONYMS, PAYMENT_SYNONYMS, STOPWORDS, WEAK_INTENT_SYNONYMS
+from app.llm.base import get_openai_client
+from app.rag.router import route_query as _route_query
+from app.rag.vocab.rules import ACTION_SYNONYMS, CARD_NAME_SYNONYMS, PAYMENT_SYNONYMS, STOPWORDS, WEAK_INTENT_SYNONYMS
 
 load_dotenv()
 
@@ -478,21 +478,28 @@ def vector_search(
     with psycopg2.connect(**_db_config()) as conn:
         register_vector(conn)
         with conn.cursor() as cur:
-            sql = (
-                f"SELECT id, content, metadata, 1 - (embedding <=> %s) AS score "
-                f"FROM {table}{where_sql} ORDER BY embedding <=> %s LIMIT %s"
-            )
-            params = [emb, *where_params, emb, limit]
-            try:
-                cur.execute(sql, params)
-            except Exception:
-                conn.rollback()
+            def _run(where_sql: str, where_params: List[str]):
                 sql = (
-                    f"SELECT id, content, metadata, 1 - (embedding <-> %s) AS score "
-                    f"FROM {table}{where_sql} ORDER BY embedding <-> %s LIMIT %s"
+                    f"SELECT id, content, metadata, 1 - (embedding <=> %s) AS score "
+                    f"FROM {table}{where_sql} ORDER BY embedding <=> %s LIMIT %s"
                 )
-                cur.execute(sql, params)
-            return cur.fetchall()
+                params = [emb, *where_params, emb, limit]
+                try:
+                    cur.execute(sql, params)
+                except Exception:
+                    conn.rollback()
+                    sql = (
+                        f"SELECT id, content, metadata, 1 - (embedding <-> %s) AS score "
+                        f"FROM {table}{where_sql} ORDER BY embedding <-> %s LIMIT %s"
+                    )
+                    cur.execute(sql, params)
+                return cur.fetchall()
+
+            results = _run(where_sql, where_params)
+            # 필터로 결과가 0건이면 필터 없이 한 번 더 검색
+            if not results and where_sql and filters:
+                results = _run("", [])
+            return results
 
 
 def text_search(

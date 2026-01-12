@@ -4,7 +4,7 @@ from typing import Dict, List, Optional
 from flashtext import KeywordProcessor
 
 # vocab 규칙 정의
-from rag.vocab.rules import (
+from app.rag.vocab.rules import (
     ACTION_ALLOWLIST,
     ACTION_SYNONYMS,
     CARD_NAME_SYNONYMS,
@@ -72,57 +72,95 @@ def route_query(query: str) -> Dict[str, Optional[object]]:
     payments = _unique_in_order(_PAYMENT_KP.extract_keywords(normalized))
     weak_intents = _unique_in_order(_WEAK_INTENT_KP.extract_keywords(normalized))
 
+    if not card_names:
+        card_names = _unique_in_order(_fallback_contains(CARD_NAME_SYNONYMS, normalized))
+    if not actions:
+        actions = _unique_in_order(_fallback_contains(ACTION_SYNONYMS, normalized))
     if not payments:
         payments = _unique_in_order(_fallback_contains(PAYMENT_SYNONYMS, normalized))
+    if not weak_intents:
+        weak_intents = _unique_in_order(_fallback_contains(WEAK_INTENT_SYNONYMS, normalized))
 
-    route = None
-    filters: Dict[str, List[str]] = {}
+    ui_route = None
+    db_route = None  # "card_tbl" | "guide_tbl" | "both"
+    boost: Dict[str, List[str]] = {}
     query_template = None
-    should_route = False
 
+    # 검색은 항상 태우되, 실시간 트리거 여부만 제한
+    should_search = True
+    should_trigger = False
+
+    # 1) 카드 + 액션: 둘 다 있으니 가장 강함
     if card_names and actions:
-        route = ROUTE_CARD_USAGE
-        filters = {"card_name": card_names, "intent": actions}
+        ui_route = ROUTE_CARD_USAGE
+        db_route = "both"
+        boost = {"card_name": card_names, "intent": actions}
         if payments:
-            filters["payment_method"] = payments
+            boost["payment_method"] = payments
         if weak_intents:
-            filters["weak_intent"] = weak_intents
+            boost["weak_intent"] = weak_intents
         query_template = f"{card_names[0]} {actions[0]} 방법"
-        should_route = True
+        should_trigger = True
+
+    # 2) 카드 + 결제수단
     elif card_names and payments:
-        route = ROUTE_CARD_USAGE
-        filters = {"card_name": card_names, "payment_method": payments}
+        ui_route = ROUTE_CARD_USAGE
+        db_route = "card_tbl"
+        boost = {"card_name": card_names, "payment_method": payments}
         query_template = f"{card_names[0]} {payments[0]} 사용 방법"
-        should_route = True
+        should_trigger = True
+
+    # 3) 카드 + 약한의도
     elif card_names and weak_intents:
-        route = WEAK_INTENT_ROUTE_HINTS.get(weak_intents[0], ROUTE_CARD_USAGE)
-        filters = {"card_name": card_names, "weak_intent": weak_intents}
-        if route == ROUTE_CARD_INFO:
+        ui_route = WEAK_INTENT_ROUTE_HINTS.get(weak_intents[0], ROUTE_CARD_USAGE)
+        db_route = "both"
+        boost = {"card_name": card_names, "weak_intent": weak_intents}
+        if ui_route == ROUTE_CARD_INFO:
             query_template = f"{card_names[0]} {weak_intents[0]}"
         else:
             query_template = f"{card_names[0]} {weak_intents[0]} 방법"
-        should_route = True
+        should_trigger = True
+
+    # 4) 카드만
     elif card_names:
-        route = ROUTE_CARD_INFO
-        filters = {"card_name": card_names}
-        query_template = f"{card_names[0]} 카드 정보"
-        should_route = True
+        ui_route = ROUTE_CARD_INFO
+        db_route = "card_tbl"
+        boost = {"card_name": card_names}
+        query_template = f"{card_names[0]} 정보"
+        should_trigger = True
+
+    # 5) 액션만 (중요! allowlist로 검색을 막지 말기)
     elif actions:
-        route = ROUTE_CARD_USAGE
-        filters = {"intent": actions}
+        ui_route = ROUTE_CARD_USAGE
+        db_route = "guide_tbl"
+        boost = {"intent": actions}
         if payments:
-            filters["payment_method"] = payments
+            boost["payment_method"] = payments
         query_template = f"카드 {actions[0]} 방법"
-        should_route = any(action in ACTION_ALLOWLIST for action in actions)
+        should_trigger = any(a in ACTION_ALLOWLIST for a in actions)
+
+    # 6) 결제수단만
     elif payments:
-        route = ROUTE_CARD_USAGE
-        filters = {"payment_method": payments}
+        ui_route = ROUTE_CARD_USAGE
+        db_route = "card_tbl"
+        boost = {"payment_method": payments}
         query_template = f"{payments[0]} 사용 방법"
-        should_route = any(payment in PAYMENT_ALLOWLIST for payment in payments)
+        should_trigger = any(p in PAYMENT_ALLOWLIST for p in payments)
+
+    # 7) 아무것도 못 잡으면: fallback 검색
+    else:
+        ui_route = ROUTE_CARD_USAGE
+        db_route = "both"
+        boost = {}
+        query_template = None
+        should_trigger = False
 
     return {
-        "route": route,
-        "filters": filters,
+        "route": ui_route,
+        "filters": boost,
+        "ui_route": ui_route,
+        "db_route": db_route,
+        "boost": boost,
         "query_template": query_template,
         "matched": {
             "card_names": card_names,
@@ -130,5 +168,7 @@ def route_query(query: str) -> Dict[str, Optional[object]]:
             "payments": payments,
             "weak_intents": weak_intents,
         },
-        "should_route": should_route,
+        "should_search": should_search,
+        "should_trigger": should_trigger,
+        "should_route": should_trigger,  # 기존 키 유지
     }

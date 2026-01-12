@@ -2,10 +2,10 @@ from dataclasses import dataclass
 import re
 from typing import Any, Dict, List, Optional
 
-from llm.rag_answerer import generate_answer, generate_detail_cards
-from rag.retriever import retrieve_docs, retrieve_multi
-from rag.router import route_query
-from rag.vocab.rules import STOPWORDS
+from app.llm.rag_answerer import generate_answer, generate_detail_cards
+from app.rag.retriever import retrieve_docs, retrieve_multi
+from app.rag.router import route_query
+from app.rag.vocab.rules import STOPWORDS
 
 
 # --- 설정 ---
@@ -246,8 +246,8 @@ async def retrieve(
     routing: Dict[str, Any],
     top_k: int,
 ) -> List[Dict[str, Any]]:
-    filters = routing.get("filters") or {}
-    route_name = routing.get("route")
+    filters = routing.get("filters") or routing.get("boost") or {}
+    route_name = routing.get("route") or routing.get("ui_route")
 
     sources = set()
     if route_name == "card_info":
@@ -284,7 +284,10 @@ async def run_rag(query: str, config: Optional[RAGConfig] = None) -> Dict[str, A
     cfg = config or RAGConfig()
     routing = route(query)
 
-    if not routing.get("should_route"):
+    should_search = routing.get("should_search")
+    if should_search is None:
+        should_search = routing.get("should_route")
+    if not should_search:
         return {
             "currentSituation": [],
             "nextStep": [],
