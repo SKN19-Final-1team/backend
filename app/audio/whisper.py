@@ -42,7 +42,7 @@ class WhisperService:
 
         HALLUCINATION_KEYWORDS = [
             "시청해주셔서", "시청해 주셔서", "구독과 좋아요", 
-            "재택 플러스", "MBC", "뉴스", "투데이", 
+            "재택 플러스", "MBC", "뉴스", "투데이", "먹방", "영상편집", "영상", "편집", "진심으로"
         ]
         
         while self.running:
@@ -60,7 +60,6 @@ class WhisperService:
                     model="whisper-1",
                     file=audio_file,
                     language="ko",
-                    prompt="이것은 카드사 상담 대화입니다. 침묵 구간은 무시하세요. 이 상황을 고려하지만 문장을 들리는 대로 적으세요"
                 )
                 text = transcript.text.strip()
 
@@ -71,7 +70,6 @@ class WhisperService:
 
                 if any(keyword in text for keyword in HALLUCINATION_KEYWORDS):
                     if len(text) < 20: 
-                        print(f"[할루시네이션 감지 및 제거] : {text}")
                         self.queue.task_done()
                         continue
 

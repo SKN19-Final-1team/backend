@@ -17,14 +17,14 @@ async def websocket_endpoint(websocket: WebSocket):
     # 결과 처리 콜백
     async def on_transcription_result(text: str):
         print(f"[{session_id}] STT 결과 : {text}")
-        await websocket.send_json(text)
+        # await websocket.send_json(text)
 
         try:
             result = await run_rag(text, config=RAGConfig(top_k=4, normalize_keywords=True))
             
             if result:
                 print(f"[{session_id}] RAG 검색 결과 : {result}")
-                # await websocket.send_json(result)  RAG 검색 결과 프론트로 전송
+                await websocket.send_json(result)  # RAG 검색 결과 프론트로 전송
 
                 
         except Exception as e:
