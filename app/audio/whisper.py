@@ -69,9 +69,8 @@ class WhisperService:
                     continue
 
                 if any(keyword in text for keyword in HALLUCINATION_KEYWORDS):
-                    if len(text) < 20: 
-                        self.queue.task_done()
-                        continue
+                    self.queue.task_done()
+                    continue
 
                 # 비동기 콜백 함수를 메인 스케줄러에 등록
                 if text and self.callback:

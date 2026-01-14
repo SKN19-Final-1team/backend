@@ -1,7 +1,7 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 import asyncio
 import uuid
-from audio.whisper import WhisperService 
+from app.audio.whisper import WhisperService
 from app.rag.pipeline import RAGConfig, run_rag
 
 router = APIRouter()
