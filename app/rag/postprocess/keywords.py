@@ -110,8 +110,6 @@ def collect_query_keywords(query: str, routing: Dict[str, Any], normalize: bool)
         keywords: List[str] = []
         for key in ("card_names", "actions", "payments", "weak_intents"):
             keywords.extend(matched.get(key) or [])
-        if not keywords:
-            keywords = extract_query_terms(query)
     else:
         keywords = extract_query_terms(query)
     normalized = []

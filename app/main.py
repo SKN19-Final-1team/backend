@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from api.v1.routers import api_router
+from app.api.v1.routers import api_router
 
 app = FastAPI(
     title = "CALL:ACT",
