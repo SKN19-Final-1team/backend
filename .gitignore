@@ -1,8 +1,50 @@
+# Python
 __pycache__/
-cache/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
 
+# Cache
+cache/
 !app/rag/cache/
 !app/rag/cache/**
+
+# Environment variables
 *.env
+.env.local
+.env.*.local
+
+# IDE
+.cursor/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 .DS_Store
-*.pyc
+
+# Cloud sync files
+OneDrive/
+Dropbox/
+Google Drive/
+iCloud Drive/
+*.icloud
+
+# Logs
+*.log
+logs/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# OS
+Thumbs.db
+.DS_Store
