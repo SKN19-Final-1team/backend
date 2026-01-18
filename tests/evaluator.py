@@ -16,9 +16,11 @@ class ModelEvaluator:
                 model_path=self.model_path,
                 n_gpu_layers=self.n_gpu_layers, # -1: 모든 레이어 GPU 할당
                 n_ctx=4096,                     # 컨텍스트 윈도우
-                verbose=False
+                verbose=True
             )       
-            print("✅ 모델 로드 완료")
+            loaded_layers = self.llm.n_gpu_layers
+
+            print(f"✅ 모델 로드 완료: {loaded_layers} 사용")
         except Exception as e:
             print(f"❌ 모델 로드 실패: {e}")
 
