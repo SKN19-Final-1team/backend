@@ -25,12 +25,11 @@ from tqdm import tqdm
 load_dotenv(Path(__file__).parent / '.env', override=False)
 load_dotenv(Path(__file__).parent.parent.parent.parent / '.env', override=False)
 
+# config.py에서 경로 가져오기
+from config import KEYWORDS_DICT_DIR_PROD, KEYWORDS_DICT_DIR_DEV
+
 # 상수
 BASE_DIR = Path(__file__).parent.parent.parent.parent.parent
-# 키워드 사전 파일 경로 (우선순위: with_patterns > with_compound > with_synonyms > v2)
-# 개발 환경: data-preprocessing_dev 사용, 프로덕션: data-preprocessing 사용
-KEYWORDS_DICT_DIR_DEV = BASE_DIR / "data-preprocessing_dev" / "preprocessing" / "teddycard"
-KEYWORDS_DICT_DIR_PROD = BASE_DIR / "data-preprocessing" / "data" / "teddycard"
 KEYWORDS_DICT_FILES = [
     "keywords_dict_v2_with_patterns.json",  # 최신 버전
     "keywords_dict_with_compound.json",
