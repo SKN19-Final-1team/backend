@@ -60,12 +60,12 @@ END $$;
 
 -- 상태 타입
 DO $$ BEGIN
-    CREATE TYPE status_type AS ENUM ('active', 'inactive', 'suspended');
+    CREATE TYPE status_type AS ENUM ('active', 'inactive', 'suspended', 'vacation');
 EXCEPTION
     WHEN duplicate_object THEN null;
 END $$;
 
--- 3. employees 테이블 생성 (기본 상담사 생성용)
+-- 3. employees 테이블 생성
 CREATE TABLE IF NOT EXISTS employees (
     id VARCHAR(50) PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
@@ -83,6 +83,42 @@ CREATE INDEX IF NOT EXISTS idx_employees_department ON employees(department);
 CREATE INDEX IF NOT EXISTS idx_employees_status ON employees(status);
 
 COMMENT ON TABLE employees IS '직원(상담사) 정보 테이블';
+
+-- employees 테이블에 성과 지표 컬럼 추가 (기존 테이블 업그레이드용)
+DO $$ 
+BEGIN
+    -- consultations: 상담 건수
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'employees' AND column_name = 'consultations'
+    ) THEN
+        ALTER TABLE employees ADD COLUMN consultations INTEGER DEFAULT 0;
+    END IF;
+    
+    -- fcr: First Call Resolution 비율 (0-100)
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'employees' AND column_name = 'fcr'
+    ) THEN
+        ALTER TABLE employees ADD COLUMN fcr INTEGER DEFAULT 0;
+    END IF;
+    
+    -- avgTime: 평균 상담 시간 (형식: "MM:SS")
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'employees' AND column_name = 'avgTime'
+    ) THEN
+        ALTER TABLE employees ADD COLUMN "avgTime" VARCHAR(10) DEFAULT '0:00';
+    END IF;
+    
+    -- rank: 성과 순위 (1부터 시작)
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'employees' AND column_name = 'rank'
+    ) THEN
+        ALTER TABLE employees ADD COLUMN rank INTEGER DEFAULT 0;
+    END IF;
+END $$;
 
 -- 4. consultations 테이블 생성
 CREATE TABLE IF NOT EXISTS consultations (
@@ -136,13 +172,7 @@ CREATE INDEX IF NOT EXISTS idx_consultation_documents_usage_count ON consultatio
 
 COMMENT ON TABLE consultation_documents IS '상담 사례 문서 + RAG 검색용 VectorDB 메타데이터';
 
--- 6. 기본 상담사 생성 (테디카드 데이터 적재용)
-INSERT INTO employees (id, name, email, role, department, status, created_at)
-VALUES 
-    ('EMP-TEDI-DEFAULT', '테디카드 기본 상담사', 'default@tedicard.com', '상담사', '테디카드 상담팀', 'active', NOW())
-ON CONFLICT (id) DO NOTHING;
-
--- 7. 벡터 인덱스 생성 (HNSW - 대규모 데이터용)
+-- 6. 벡터 인덱스 생성 (HNSW - 대규모 데이터용)
 -- 주의: 데이터 삽입 후 인덱스를 생성하는 것이 성능상 유리함
 -- 하지만 여기서 미리 생성해도 됨 (빈 테이블에서 생성하면 빠름)
 CREATE INDEX IF NOT EXISTS idx_consultation_documents_embedding_hnsw
@@ -152,7 +182,7 @@ WITH (m = 16, ef_construction = 64);
 
 COMMENT ON INDEX idx_consultation_documents_embedding_hnsw IS 'consultation_documents 임베딩 벡터 인덱스 (HNSW)';
 
--- 8. 성공 메시지 출력
+-- 7. 성공 메시지 출력
 DO $$
 BEGIN
     RAISE NOTICE 'DB 설정이 완료되었습니다.';
@@ -160,7 +190,6 @@ BEGIN
     RAISE NOTICE '- employees 테이블 생성됨';
     RAISE NOTICE '- consultations 테이블 생성됨';
     RAISE NOTICE '- consultation_documents 테이블 생성됨';
-    RAISE NOTICE '- 기본 상담사 생성됨 (EMP-TEDI-DEFAULT)';
     RAISE NOTICE '- 벡터 인덱스 생성됨';
 END $$;
 

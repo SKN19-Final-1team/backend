@@ -27,11 +27,14 @@ from tqdm import tqdm
 load_dotenv(Path(__file__).parent / '.env', override=False)
 load_dotenv(Path(__file__).parent.parent.parent.parent / '.env', override=False)
 
+# config.py에서 경로 가져오기
+from config import TEDDY_DATA_DIR_PROD, TEDDY_DATA_DIR_DEV
+
 # 상수
 BASE_DIR = Path(__file__).parent.parent.parent.parent.parent
-# 데이터 파일 경로 (프로덕션 우선, 개발 환경 대체)
-DATA_DIR_PROD = BASE_DIR / "data-preprocessing" / "data" / "teddycard"
-DATA_DIR_DEV = BASE_DIR / "data-preprocessing_dev" / "preprocessing" / "output"
+# 데이터 파일 경로 (config.py에서 가져온 값 사용)
+DATA_DIR_PROD = TEDDY_DATA_DIR_PROD
+DATA_DIR_DEV = TEDDY_DATA_DIR_DEV
 
 # 데이터 파일
 SERVICE_GUIDES_FILE = "teddycard_service_guides_with_embeddings.json"
