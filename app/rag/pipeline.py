@@ -16,6 +16,8 @@ from app.rag.postprocess.cards import omit_empty, promote_definition_doc, split_
 from app.rag.postprocess.keywords import collect_query_keywords, normalize_text
 from app.rag.retriever import retrieve_multi
 from app.rag.router import route_query
+from app.llm.sllm_refiner import refine_stt_text
+
 
 LOG_TIMING = os.getenv("RAG_LOG_TIMING", "1") != "0"
 
@@ -91,7 +93,11 @@ async def retrieve(
 async def run_rag(query: str, config: Optional[RAGConfig] = None) -> Dict[str, Any]:
     cfg = config or RAGConfig()
     t_start = time.perf_counter()
-    routing = route(query)
+    
+    # Refine STT text using sLLM (if enabled)
+    refined_query = refine_stt_text(query)
+    
+    routing = route(refined_query)
     t_route = time.perf_counter()
 
     should_search = routing.get("should_search")
@@ -114,7 +120,7 @@ async def run_rag(query: str, config: Optional[RAGConfig] = None) -> Dict[str, A
             "meta": {"model": None, "doc_count": 0, "context_chars": 0},
         }
 
-    docs = await retrieve(query=query, routing=routing, top_k=cfg.top_k)
+    docs = await retrieve(query=refined_query, routing=routing, top_k=cfg.top_k)
     t_retrieve = time.perf_counter()
     if routing.get("route") == "card_info":
         docs = promote_definition_doc(docs)
@@ -137,7 +143,7 @@ async def run_rag(query: str, config: Optional[RAGConfig] = None) -> Dict[str, A
             cache_status = f"hit({cache_backend})"
         else:
             cards, guidance_script = generate_detail_cards(
-                query=query,
+                query=refined_query,
                 docs=docs,
                 model=cfg.model,
                 temperature=0.0,
@@ -147,7 +153,7 @@ async def run_rag(query: str, config: Optional[RAGConfig] = None) -> Dict[str, A
             cache_status = "miss"
     else:
         cards, guidance_script = generate_detail_cards(
-            query=query,
+            query=refined_query,
             docs=docs,
             model=cfg.model,
             temperature=0.0,
@@ -156,11 +162,11 @@ async def run_rag(query: str, config: Optional[RAGConfig] = None) -> Dict[str, A
     t_cards = time.perf_counter()
     if cfg.strict_guidance_script:
         guidance_script = _strict_guidance_script(guidance_script, docs)
-    query_keywords = collect_query_keywords(query, routing, cfg.normalize_keywords)
+    query_keywords = collect_query_keywords(refined_query, routing, cfg.normalize_keywords)
     for card in cards:
         card["keywords"] = query_keywords
     cards = [omit_empty(card) for card in cards]
-    current_cards, next_cards = split_cards_by_query(cards, query)
+    current_cards, next_cards = split_cards_by_query(cards, refined_query)
     t_post = time.perf_counter()
 
     if LOG_TIMING:
