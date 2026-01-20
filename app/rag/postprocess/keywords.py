@@ -2,7 +2,7 @@ from typing import Any, Dict, List
 
 import re
 
-from app.rag.vocab.rules import STOPWORDS
+from app.rag.vocab.keyword_dict import STOPWORDS
 
 _TERM_WS_RE = re.compile(r"\s+")
 _TERM_CLEAN_RE = re.compile(r"[^\w가-힣]+")

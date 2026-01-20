@@ -13,6 +13,7 @@ from app.rag.cache.card_cache import (
     doc_cache_id,
 )
 from app.rag.postprocess.cards import omit_empty, promote_definition_doc, split_cards_by_query
+from app.rag.postprocess.sections import clean_card_docs
 from app.rag.postprocess.keywords import collect_query_keywords, normalize_text
 from app.rag.retriever import retrieve_multi
 from app.rag.router import route_query
@@ -68,15 +69,15 @@ async def retrieve(
 
     sources = set()
     if route_name == "card_info":
-        sources.add("card_tbl")
+        sources.add("card_products")
     elif filters.get("card_name"):
-        sources.update({"card_tbl", "guide_tbl"})
+        sources.update({"card_products", "service_guide_documents"})
     if filters.get("payment_method"):
-        sources.update({"card_tbl", "guide_tbl"})
+        sources.update({"card_products", "service_guide_documents"})
     if filters.get("intent") or filters.get("weak_intent"):
-        sources.add("guide_tbl")
+        sources.add("service_guide_documents")
     if not sources:
-        sources.update({"card_tbl", "guide_tbl"})
+        sources.update({"card_products", "service_guide_documents"})
 
     return await retrieve_multi(
         query=query,
@@ -115,6 +116,7 @@ async def run_rag(query: str, config: Optional[RAGConfig] = None) -> Dict[str, A
         }
 
     docs = await retrieve(query=query, routing=routing, top_k=cfg.top_k)
+    docs = clean_card_docs(docs, query)
     t_retrieve = time.perf_counter()
     if routing.get("route") == "card_info":
         docs = promote_definition_doc(docs)

@@ -101,6 +101,7 @@ python-dotenv==1.2.1
 python-multipart==0.0.21
 pytz==2025.2
 PyYAML==6.0.3
+rapidfuzz==3.9.6
 regex==2025.11.3
 redis==5.0.4
 requests==2.32.5
