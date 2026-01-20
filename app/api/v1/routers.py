@@ -1,7 +1,8 @@
 from fastapi import APIRouter
-from app.api.v1.endpoints import websocket
+from app.api.v1.endpoints import websocket, followup
 
 api_router = APIRouter()
 
 # 웹소켓 라우터
 api_router.include_router(websocket.router, tags=["websocket"])
+api_router.include_router(followup.router, prefix="/followup", tags=["followup"])
