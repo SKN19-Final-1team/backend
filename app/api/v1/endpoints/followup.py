@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 from typing import List
-from utils.evaluate_call import evaluate_call
-from llm.follow_up.feedback_generator import generate_feedback
+from app.utils.evaluate_call import evaluate_call
+from app.llm.follow_up.feedback_generator import generate_feedback
 
 router = APIRouter()
 
@@ -30,10 +30,9 @@ async def create_summary(request: Request, body: SummaryRequest):
 # /api/v1/followup/evaluate
 @router.post("/evaluate")
 async def create_evaluation(body: EvaluationRequest):
-    
     try:
         # OpenAI를 통한 피드백 생성
-        feedback = await generate_feedback(body.script)
+        feedback = generate_feedback(body.script)
         
         # 로컬 로직을 통한 정량 점수 계산
         score = evaluate_call(body.work_time, body.emotions)
