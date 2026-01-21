@@ -32,6 +32,11 @@ def refine_text(text: str) -> Dict[str, any]:
     if not text or not text.strip():
         return {"text": text, "keywords": []}
 
+    # 1. 단어 사전 기반 교정 (Dictionary-based Normalization)
+    from app.rag.vocab.keyword_dict import normalize_sentence_with_dict
+    text = normalize_sentence_with_dict(text)
+    print(f"[sLLM] Dictionary normalized text: {text}")
+
     try:
         # 개선된 프롬프트: 음성 인식 오류 + 교정 + 키워드 추출
         system_prompt = """당신은 금융 상담 전문 AI입니다.
