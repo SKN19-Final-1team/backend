@@ -13,7 +13,6 @@ class SummaryRequest(BaseModel):
 # 평가 점수 요청용
 class EvaluationRequest(BaseModel):
     script: str
-    work_time: int
     emotions: List[str]
 
 
@@ -35,7 +34,7 @@ async def create_evaluation(body: EvaluationRequest):
         feedback = generate_feedback(body.script)
         
         # 로컬 로직을 통한 정량 점수 계산
-        score = evaluate_call(body.work_time, body.emotions)
+        score = evaluate_call(body.emotions)
         
         final_report = {
             "feedback" : feedback,

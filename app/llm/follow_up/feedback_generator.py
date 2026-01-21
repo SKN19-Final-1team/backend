@@ -6,7 +6,7 @@ def _make_prompt(script):
             상담 스크립트를 평가 기준에 따라 객관적으로 평가하세요
             
             ### 제약 사항
-            1. 모든 감점에는 구체적인 발화 근거를 반드시 제시한다
+            1. 피드백에는 점수에 대한 근거를 반드시 제시한다
             2. 고객의 감사 표현은 고객 발화에서만 카운트한다
             3. 추측, 설명 문장, 자연어 해설 금지 - JSON만 출력한다
             4. 총 점수는 60점이며 각 2개 점수의 총합이다
@@ -61,32 +61,16 @@ def _make_prompt(script):
             ### 출력 형식 (JSON)
             {{
             "manual_compliance": {{
-                "intro": {{
-                "score": 0,
-                "evidence": []
-                }},
-                "response": {{
-                "score": 0,
-                "evidence": []
-                }},
-                "explanation": {{
-                "score": 0,
-                "evidence": []
-                }},
-                "proactivity": {{
-                "score": 0,
-                "evidence": []
-                }},
-                "accuracy": {{
-                "score": 0,
-                "evidence": []
-                }},
+                "intro_score": 0,
+                "response_score": 0,
+                "explanation_score": 0,
+                "proactivity_score": 0,
+                "accuracy_score": 0,
                 "manual_score": "0~50점"
             }},
             "customer_thanks": {{
                 "count": 0,
                 "thanks_score": "0~10점",
-                "evidence": []
             }},
             "final_score": {{
                 "total": "manual_score + thanks_score",
