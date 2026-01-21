@@ -1,8 +1,7 @@
+from openai import AsyncOpenAI
+from dotenv import load_dotenv
 import json
-from openai import OpenAI
-
-RUNPOD_URL = "" 
-API_KEY = ""
+import os
 
 system_prompt = """
 상담 스크립트를 바탕으로 아래 JSON 형식에 맞춰 응답하세요
@@ -25,14 +24,16 @@ system_prompt = """
 }}
 """
 
-client = OpenAI(
-    base_url=RUNPOD_URL,
-    api_key=API_KEY
+load_dotenv()
+
+client = AsyncOpenAI(
+    base_url=os.getenv("RUNPOD_URL"),
+    api_key=os.getenv("API_KEY")
 )
 
-def get_summarize(script):
+async def get_summarize(script):
     try:
-        response = client.chat.completions.create(
+        response = await client.chat.completions.create(
             model="local-model",
             messages=[
                 {"role": "system", "content": system_prompt},

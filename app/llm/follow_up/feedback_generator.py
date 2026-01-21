@@ -1,5 +1,7 @@
 import json
-import openai
+from openai import AsyncOpenAI
+from dotenv import load_dotenv
+import os
 
 SYSTEM_PROMPT = """
 상담 스크립트를 평가 기준에 따라 객관적으로 평가하세요
@@ -79,9 +81,15 @@ accuracy
 }}
 """
 
-def generate_feedback(script, model_name="gpt-4.1-mini"):
+load_dotenv()
+
+client = AsyncOpenAI(
+    api_key=os.getenv("OPENAI_API_KEY")
+)
+
+async def generate_feedback(script, model_name="gpt-4.1-mini"):
     try:
-        response = openai.chat.completions.create(
+        response = await client.chat.completions.create(
             model=model_name,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},

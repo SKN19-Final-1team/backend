@@ -3,16 +3,17 @@ from app.llm.follow_up.feedback_generator import generate_feedback
 from app.llm.follow_up.summarize_generator import get_summarize    
 from fastapi import APIRouter, UploadFile, File, HTTPException
 import time
+import asyncio
 
 router = APIRouter()
 
 # 화자 분리 STT
 async def transcribe_audio():
-    # 화자 분리 STT 코드 넣어서 따로 파일로 분리
-    # 현재는 그냥 mockdata 넣기
-    script = "상담사: ▲▲카드 ▲▲▲입니다.\n손님: 예 안녕하세요? 어 저기\n상담사: 네 안녕하십니까?\n손님: ▲▲카드 결 결제하는 그\n손님: 카 저기 결 계좌 이체는 월 변경할려 그러거든요.\n상담사: 결제 계좌를 변경하시겠다 그 말씀이신 거예요?\n손님: 예 예.\n상담사: 알겠습니다. 네 ▲▲▲ 님 본인 맞으십니까?\n손님: 네.\n상담사: 결제 계좌가 저희 쪽에 ▲▲은행 계좌로 등록이 되어 있으신데요. 변경하시고자 하시는 은행명과 계좌 번호 말씀해 주시겠어요, 손님?\n손님: 예.\n손님: ▲▲은행이고요.\n상담사: 네 네.\n손님: 예. ▲▲▲\n상담사: ▲▲▲\n손님: ▲▲▲\n상담사: ▲▲▲\n손님: ▲▲▲\n상담사: ▲▲▲\n손님: ▲▲▲▲\n상담사: ▲▲▲번이요? 말씀해주신 계좌 지금 저희 쪽에서 확인 중에 있습니다. 잠시만 기다려주시겠습니까?\n손님: 예.\n상담사: 네, 손님. 기다려 주셔서 감사합니다. ▲▲카드 이용 대금 출금 이체 계좌 등록에 관한 접수 내용 확인하겠습니다. 생년월일 ▲▲년 ▲▲월 ▲▲일, ▲▲▲ 님 명의로 된 ▲▲은행 ▲▲▲▲▲▲▲▲▲▲▲▲▲ 계좌로\n상담사: 하는 내용이 맞으십니까?\n손님: 네.\n상담사: 확인해주셔서 감사합니다. 요청하신 대로 결제 계좌는 말씀해 주신 ▲▲은행 계좌로 변경 등록 처리해드렸습니다. 그렇기때문에 이 번 ▲▲월 ▲▲일 결제 대금부터는 변경해드린 ▲▲은행 계좌에서 출금 처리가 되는 거고요. 타은행으로 결제\n상담사: 이기 때문에 한도는 결제일 다음 날 원복이 됩니다. 요청하신 대로 결제 계좌는 ▲▲은행 계좌에서 ▲▲은행 계좌로 변경 등록 처리 완료해드렸습니다.\n손님: 네.\n상담사: 감사합니다. 그 외에도 저희 쪽에 장기 카드 대출 등을 이용할 수가 있는데 혹시 카드론 사용 계획은 없으신가요? 유동적이라 변동될 수 있어서요.\n손님: 괜찮습니다.\n상담사: 예 감사합니다. 저는 상담사 ▲▲▲이었습니다."
+    # 화자 분리 STT 
+    # 파일로 분리해서 다른 함수처럼 모듈로 불러오기
+    # 현재는 그냥 mockdata 넣은 함수
+    script = "상담사: 상담원 ▲▲▲입니다.\n손님: 네, 어 금요일 날인가 ▲▲카드에서 아 제가 카드를 해지했거든요. 다른 카드로 바꿨는데\n상담사: 네.\n손님: 그게 무슨 분쟁 뭐에서 연락이 왔어요.\n상담사: 네.\n손님: 내가 못 받았는데 그게 문자가 왔더라고요, ▲▲▲ 씨라고요.\n손님: 뭐 분쟁 뭐 뭐라고 그러면서요.\n상담사: 네.\n손님: 그래서 저 저 통화를 하고 싶어서요.\n상담사: 아 그러셨을까요, 손님? 많이 궁금하셨을 텐데요, 제가 본인 확인 후 안내해 드리겠습니다. 휴대폰 번호와 생년월일 말씀 부탁드립니다.\n손님: 네.\n손님: ▲▲▲▲▲▲▲▲▲\n손님: ▲▲▲▲▲▲\n상담사: 네, 전화주신 손님 본인에 성함 말씀해 주시겠습니까?\n손님: 네.\n손님: ▲▲▲입니다.\n상담사: 네, 손님 마지막으로 카드와 연결되어 있는 결제 계좌 은행 말씀 부탁드립니다.\n손님: ▲▲은행이요.\n상담사: 네, 손님 본인 확인 감사합니다. 네, 손님 확인해 보니 문자받으셨던 내용 중에 담당자분 연락처 직통 번호 있으신 걸로 확인되는데요.\n손님: 네.\n손님: 네, 그래서 왜냐하면 전화를 요즘 함부로 받지 않고 내가 인제 그런 문제로 제가 해지됐기 때문에 그 대표전화를 일단 한 거예요.\n상담사: 네.\n상담사: 아 그러셨을까요? 그러면 제가 이 부분에 대해서 그럼 담당부서로 전달을 해 드릴까요.\n손님: 네.\n손님: 아 좀 연결해 줄 수는 없어요?\n상담사: 네, 바로 연결은 어렵습니다.\n손님: 아 그러면 그 전화가 맞는 거죠? 네, 알겠습니다. 네 그럼 전화할게요.\n상담사: 네. 그렇습니다.\n상담사: 네.\n상담사: 네, 알겠습니다. 상담사 ▲▲▲이었습니다\n손님: 네."
     return script
-
 
 @router.post("/")
 async def create_summary(file: UploadFile = File(...)):
@@ -20,30 +21,29 @@ async def create_summary(file: UploadFile = File(...)):
         # 화자 분리 STT
         script = await transcribe_audio()
         
-        # 후처리 요약 생성 (Runpod/kanana)
-        summarize_start = time.time()
-        summarize_result = get_summarize(script)
-        summarize_end = time.time()
+        start_parallel = time.time()
+        
+        # 두 함수 동시에 실행
+        summarize_task = get_summarize(script)
+        feedback_task = generate_feedback(script)
+        
+        summarize_result, feedback = await asyncio.gather(summarize_task, feedback_task)
+        
+        end_parallel = time.time()
+        parallel_time = end_parallel - start_parallel
+
+        # 오류 체크
         if "error" in summarize_result:
             raise HTTPException(status_code=500, detail=summarize_result["error"])
-        summarize_time = summarize_end - summarize_start
-        
-        
-        # 피드백 생성 (OpenAI/GPT)
-        fe_start = time.time()
-        feedback = generate_feedback(script)
-        fe_end = time.time()
-        if isinstance(feedback, str): # 에러 메시지가 문자열로 온 경우
+        if isinstance(feedback, str):
             raise HTTPException(status_code=500, detail=feedback)
-        fe_time = fe_end - fe_start
-        
-        # 감정 점수 계산 및 병합
+
+        # 감정 점수 계산
         score = evaluate_call(feedback['emotions'])
         feedback["emotion_score"] = score.get("emotion_score", 0)
-        
-        print(f"요약 생성 시간 : {summarize_time}, 피드백 생성 시간 : {fe_time}")
-        
-        # 최종 응답
+
+        print(f"병렬 처리 시간(요약+피드백): {parallel_time:.2f}초")
+
         return {
             "status": "success",
             "summary": summarize_result,
