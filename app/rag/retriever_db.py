@@ -144,6 +144,32 @@ def _source_sql(table: str, include_embedding: bool) -> str:
     return f"SELECT {', '.join(select_parts)} FROM {actual}"
 
 
+def fetch_docs_by_ids(table: str, ids: List[str]) -> List[Dict[str, object]]:
+    if not ids:
+        return []
+    safe_table = _safe_table(table)
+    sql = _source_sql(safe_table, include_embedding=False) + " WHERE id = ANY(%s)"
+    with _db_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (ids,))
+            rows = cur.fetchall()
+    docs: List[Dict[str, object]] = []
+    for doc_id, content, metadata in rows:
+        meta = metadata if isinstance(metadata, dict) else {}
+        title = meta.get("title") or meta.get("name") or meta.get("card_name")
+        docs.append(
+            {
+                "id": str(doc_id),
+                "db_id": doc_id,
+                "title": title,
+                "content": content or "",
+                "metadata": meta,
+                "table": safe_table,
+            }
+        )
+    return docs
+
+
 def _build_like_group(terms: List[str], params: List[str]) -> Optional[str]:
     if not terms:
         return None

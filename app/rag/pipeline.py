@@ -12,6 +12,12 @@ from app.rag.cache.card_cache import (
     card_cache_set,
     doc_cache_id,
 )
+from app.rag.cache.retrieval_cache import (
+    RETRIEVE_CACHE_ENABLED,
+    build_retrieval_cache_key,
+    retrieval_cache_get,
+    retrieval_cache_set,
+)
 from app.rag.postprocess.cards import omit_empty, promote_definition_doc, split_cards_by_query
 from app.rag.postprocess.sections import clean_card_docs
 from app.rag.postprocess.keywords import (
@@ -22,10 +28,12 @@ from app.rag.postprocess.keywords import (
     text_has_any,
 )
 from app.rag.retriever import retrieve_multi
+from app.rag.retriever_db import fetch_docs_by_ids
 from app.rag.router import route_query
 
 # --- sLLM을 사용한 텍스트 교정 및 키워드 추출 ---
-from app.llm.sllm_refiner import refine_text
+# NOTE: sLLM 적용은 잠시 비활성화(주석 처리) 상태.
+# from app.llm.sllm_refiner import refine_text
 
 
 LOG_TIMING = os.getenv("RAG_LOG_TIMING", "1") != "0"
@@ -69,7 +77,7 @@ class RAGConfig:
     temperature: float = 0.2
     no_route_answer: str = "카드명/상황을 조금 더 구체적으로 말씀해 주세요."
     include_docs: bool = True
-    normalize_keywords: bool = False
+    normalize_keywords: bool = True
     strict_guidance_script: bool = True
     llm_card_top_n: int = 2
 
@@ -96,6 +104,54 @@ def _strict_guidance_script(script: str, docs: List[Dict[str, Any]]) -> str:
 
 def _format_ms(seconds: float) -> str:
     return f"{seconds * 1000:.1f}ms"
+
+
+def _build_retrieve_cache_entries(docs: List[Dict[str, Any]]) -> List[Dict[str, object]]:
+    entries: List[Dict[str, object]] = []
+    for doc in docs:
+        table = doc.get("table")
+        doc_id = doc.get("db_id") or doc.get("id")
+        if not table or doc_id is None:
+            continue
+        entries.append(
+            {
+                "table": str(table),
+                "id": str(doc_id),
+                "score": float(doc.get("score", 0.0)),
+            }
+        )
+    return entries
+
+
+def _docs_from_retrieve_cache(entries: List[Dict[str, object]]) -> List[Dict[str, Any]]:
+    if not entries:
+        return []
+    ids_by_table: Dict[str, List[str]] = {}
+    for entry in entries:
+        table = str(entry.get("table") or "")
+        doc_id = entry.get("id")
+        if not table or doc_id is None:
+            continue
+        ids_by_table.setdefault(table, []).append(str(doc_id))
+
+    docs_by_key: Dict[tuple[str, str], Dict[str, Any]] = {}
+    for table, ids in ids_by_table.items():
+        fetched = fetch_docs_by_ids(table, ids)
+        for doc in fetched:
+            key = (table, str(doc.get("db_id") or doc.get("id") or ""))
+            docs_by_key[key] = doc
+
+    docs: List[Dict[str, Any]] = []
+    for entry in entries:
+        table = str(entry.get("table") or "")
+        doc_id = str(entry.get("id") or "")
+        doc = docs_by_key.get((table, doc_id))
+        if not doc:
+            return []
+        doc = dict(doc)
+        doc["score"] = float(entry.get("score", doc.get("score", 0.0)))
+        docs.append(doc)
+    return docs
 
 
 # --- 검색 ---
@@ -155,11 +211,12 @@ async def retrieve(
 async def run_rag(query: str, config: Optional[RAGConfig] = None) -> Dict[str, Any]:
     cfg = config or RAGConfig()
     t_start = time.perf_counter()
-    
+
     # --- sLLM을 사용한 텍스트 교정 및 키워드 추출 ---
-    sllm_result = refine_text(query)
-    query = sllm_result["text"]
-    sllm_keywords = sllm_result["keywords"]
+    # sllm_result = refine_text(query)
+    # query = sllm_result["text"]
+    # sllm_keywords = sllm_result["keywords"]
+    sllm_keywords: List[str] = []
     # --------------------------------------------
     
     routing = route(query)
@@ -185,7 +242,37 @@ async def run_rag(query: str, config: Optional[RAGConfig] = None) -> Dict[str, A
             "meta": {"model": None, "doc_count": 0, "context_chars": 0},
         }
 
-    docs = await retrieve(query=query, routing=routing, top_k=cfg.top_k)
+    retrieve_cache_status = "off"
+    filters = routing.get("filters") or routing.get("boost") or {}
+    cache_key = None
+    if RETRIEVE_CACHE_ENABLED:
+        cache_key = build_retrieval_cache_key(
+            normalized_query=normalize_text(query),
+            route=routing.get("route") or routing.get("ui_route") or "",
+            db_route=routing.get("db_route") or "",
+            filters=filters,
+            top_k=cfg.top_k,
+        )
+        cached = await retrieval_cache_get(cache_key)
+        if cached:
+            entries, backend = cached
+            docs = _docs_from_retrieve_cache(entries)
+            if docs:
+                retrieve_cache_status = f"hit({backend})"
+            else:
+                retrieve_cache_status = "miss"
+        else:
+            retrieve_cache_status = "miss"
+
+    if retrieve_cache_status != "hit(mem)" and retrieve_cache_status != "hit(redis)":
+        docs = await retrieve(query=query, routing=routing, top_k=cfg.top_k)
+        if RETRIEVE_CACHE_ENABLED and cache_key:
+            entries = _build_retrieve_cache_entries(docs)
+            if entries:
+                await retrieval_cache_set(cache_key, entries)
+                if retrieve_cache_status == "off":
+                    retrieve_cache_status = "miss"
+
     docs = clean_card_docs(docs, query)
     t_retrieve = time.perf_counter()
     if routing.get("route") == "card_info":
@@ -238,6 +325,9 @@ async def run_rag(query: str, config: Optional[RAGConfig] = None) -> Dict[str, A
     if LOG_TIMING:
         total = t_post - t_start
         cache_label = f" cache={cache_status}" if cache_status != "off" else ""
+        retrieve_label = (
+            f" retrieve_cache={retrieve_cache_status}" if retrieve_cache_status != "off" else ""
+        )
         print(
             "[rag] "
             f"route={_format_ms(t_route - t_start)} "
@@ -245,7 +335,7 @@ async def run_rag(query: str, config: Optional[RAGConfig] = None) -> Dict[str, A
             f"cards={_format_ms(t_cards - t_retrieve)} "
             f"post={_format_ms(t_post - t_cards)} "
             f"total={_format_ms(total)} "
-            f"docs={len(docs)} route={routing.get('route')}{cache_label}"
+            f"docs={len(docs)} route={routing.get('route')}{cache_label}{retrieve_label}"
         )
 
     response = {

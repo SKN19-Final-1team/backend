@@ -20,6 +20,7 @@ _BOOST_WEAK = float(os.getenv("RAG_RRF_BOOST_WEAK", "0.05"))
 _BOOST_CATEGORY = float(os.getenv("RAG_RRF_BOOST_CATEGORY", "0.05"))
 _BOOST_GUIDE = float(os.getenv("RAG_RRF_BOOST_GUIDE", "0.004"))
 _BOOST_GUIDE_COVERAGE = float(os.getenv("RAG_RRF_BOOST_GUIDE_COVERAGE", "0.01"))
+_BOOST_INTENT_TITLE = float(os.getenv("RAG_RRF_BOOST_INTENT_TITLE", "0.02"))
 _PENALTY_CARD_GUIDE = float(os.getenv("RAG_RRF_PENALTY_CARD_GUIDE", "0.06"))
 _BOOST_GUIDE_TOKENS = tuple(
     token.strip()
@@ -196,6 +197,19 @@ def _guide_tokens(context: SearchContext) -> List[str]:
     return tokens
 
 
+def _intent_title_terms(intent_terms: List[str]) -> List[str]:
+    if not intent_terms:
+        return []
+    expanded: List[str] = []
+    for term in intent_terms:
+        expanded.append(term)
+        if "분실" in term:
+            expanded.append("분실")
+        if "도난" in term:
+            expanded.append("도난")
+    return _unique_in_order(expanded)
+
+
 def _normalize_doc_fields(
     content: str,
     metadata: Optional[object],
@@ -271,6 +285,10 @@ def _score_candidate(
                 or _content_match_score(content, context.intent_terms, 1)
             ):
                 boost_score += _BOOST_INTENT
+            if _BOOST_INTENT_TITLE > 0 and is_guide_doc and context.intent_terms:
+                intent_title_terms = _intent_title_terms(context.intent_terms)
+                if _title_match_score(title, intent_title_terms, 1):
+                    boost_score += _BOOST_INTENT_TITLE
             if context.payment_terms and (
                 _title_match_score(title, context.payment_terms, 1)
                 or _content_match_score(content, context.payment_terms, 1)
