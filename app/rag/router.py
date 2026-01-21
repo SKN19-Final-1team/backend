@@ -122,12 +122,42 @@ def _fallback_contains(synonyms: Dict[str, List[str]], text: str) -> List[str]:
                 break
     return hits
 
+
+def _action_has_nonweak_term(action: str, text: str, compact_text: str) -> bool:
+    terms = ACTION_SYNONYMS.get(action) or []
+    for term in terms:
+        if not term:
+            continue
+        lowered = term.lower()
+        if lowered in _WEAK_TERMS:
+            continue
+        if lowered in text or lowered.replace(" ", "") in compact_text:
+            return True
+    return False
+
+
+def _filter_actions_with_weak_intents(
+    actions: List[str],
+    weak_intents: List[str],
+    text: str,
+) -> List[str]:
+    if not actions or not weak_intents:
+        return actions
+    compact_text = text.replace(" ", "")
+    return [action for action in actions if _action_has_nonweak_term(action, text, compact_text)]
+
 # FlashText 프로세서 사전 생성 (카드는 DB 기반이므로 지연 로딩)
 _CARD_KP = None
 _CARD_KP_SIZE = -1
 _ACTION_KP = _build_processor(ACTION_SYNONYMS)
 _PAYMENT_KP = _build_processor(PAYMENT_SYNONYMS)
 _WEAK_INTENT_KP = _build_processor(WEAK_INTENT_SYNONYMS)
+_WEAK_TERMS = {
+    term.lower()
+    for terms in WEAK_INTENT_SYNONYMS.values()
+    for term in terms
+    if isinstance(term, str)
+}
 
 _CARD_FUZZY = None
 _CARD_FUZZY_SIZE = -1
@@ -223,6 +253,12 @@ def _card_token_match(query: str, synonyms: Dict[str, List[str]]) -> List[str]:
         variants.extend(_expand_token_variants(token))
     if not variants:
         return []
+    token_weights = {}
+    for token in variants:
+        weight = len(token)
+        if any(ch.isascii() and ch.isalnum() for ch in token):
+            weight += 2
+        token_weights[token] = weight
     best_score = 0
     hits: List[str] = []
     for name in synonyms.keys():
@@ -230,7 +266,7 @@ def _card_token_match(query: str, synonyms: Dict[str, List[str]]) -> List[str]:
         score = 0
         for token in variants:
             if token and token in name_compact:
-                score += len(token)
+                score += token_weights.get(token, len(token))
         if score <= 0:
             continue
         if score > best_score:
@@ -241,7 +277,7 @@ def _card_token_match(query: str, synonyms: Dict[str, List[str]]) -> List[str]:
     if best_score < CARD_TOKEN_MIN_SCORE or not hits:
         return []
     if len(hits) > CARD_TOKEN_MAX_HITS:
-        return []
+        hits = sorted(hits, key=len)[:CARD_TOKEN_MAX_HITS]
     return hits
 
 
@@ -292,6 +328,8 @@ def route_query(query: str) -> Dict[str, Optional[object]]:
         candidates, mapping = _ensure_payment_fuzzy()
         payments = _unique_in_order(_fuzzy_match(normalized, candidates, mapping))
 
+    actions = _filter_actions_with_weak_intents(actions, weak_intents, normalized)
+
     pattern_hits = _match_compound_patterns(query)
     if pattern_hits:
         actions = _unique_in_order([*actions, *pattern_hits])
@@ -301,7 +339,7 @@ def route_query(query: str) -> Dict[str, Optional[object]]:
     boost: Dict[str, List[str]] = {}
     query_template = None
 
-    strong_signal = bool(card_names or actions or payments or pattern_hits)
+    strong_signal = bool(card_names or actions or payments or pattern_hits or weak_intents)
     if STRICT_SEARCH:
         should_search = strong_signal and len(normalized) >= MIN_QUERY_LEN
     else:

@@ -68,6 +68,15 @@ def _expand_variants(term: str) -> Set[str]:
     return {v for v in variants if v}
 
 
+def _expand_card_variants(term: str) -> Set[str]:
+    variants = _expand_variants(term)
+    if not term:
+        return variants
+    variants.add(term.replace("-", ""))
+    variants.add(term.replace(" ", "").replace("-", ""))
+    return {v for v in variants if v}
+
+
 def _collect_terms(key: str, entry: Dict[str, object]) -> Set[str]:
     terms = set()
     for term in [
@@ -126,6 +135,8 @@ def _keyword_entries() -> Dict[str, Dict[str, object]]:
 def get_action_synonyms() -> Dict[str, List[str]]:
     out: Dict[str, Set[str]] = {}
     for key, entry in _keyword_entries().items():
+        if key in WEAK_INTENT_CANONICALS:
+            continue
         categories = entry.get("categories") or []
         primary = _choose_primary_category(key, categories)
         if not primary:
@@ -194,9 +205,22 @@ def get_card_name_synonyms() -> Dict[str, List[str]]:
             with conn.cursor() as cur:
                 cur.execute("SELECT DISTINCT name FROM card_products WHERE name IS NOT NULL ORDER BY 1;")
                 names = [row[0] for row in cur.fetchall() if row and row[0]]
+                cur.execute(
+                    "SELECT DISTINCT metadata->>'card_name' "
+                    "FROM service_guide_documents "
+                    "WHERE metadata ? 'card_name' "
+                    "AND metadata->>'card_name' IS NOT NULL "
+                    "AND metadata->>'card_name' <> '' "
+                    "ORDER BY 1;"
+                )
+                guide_names = [row[0] for row in cur.fetchall() if row and row[0]]
     except Exception:
         return {}
-    _CARD_NAME_CACHE = {name: [] for name in names}
+    combined = {name for name in [*names, *guide_names] if name}
+    _CARD_NAME_CACHE = {
+        name: sorted(_expand_card_variants(name) - {name})
+        for name in combined
+    }
     return _CARD_NAME_CACHE
 
 

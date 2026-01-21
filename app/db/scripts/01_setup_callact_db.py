@@ -181,7 +181,8 @@ def find_keywords_dict_file() -> Optional[Path]:
         "keywords_dict_v2_with_patterns.json",
         "keywords_dict_with_compound.json",
         "keywords_dict_with_synonyms.json",
-        "keywords_dict_v2.json"
+        "keywords_dict_v2.json",
+        "keywords_dict.json",
     ]
     
     # 프로덕션 경로 확인
@@ -192,11 +193,12 @@ def find_keywords_dict_file() -> Optional[Path]:
             return file_path
     
     # 개발 경로 확인
-    for filename in KEYWORDS_DICT_FILES:
-        file_path = KEYWORDS_DICT_DIR_DEV / filename
-        if file_path.exists():
-            print(f"[INFO] Found keywords dictionary file (DEV): {file_path}")
-            return file_path
+    if KEYWORDS_DICT_DIR_DEV is not None:
+        for filename in KEYWORDS_DICT_FILES:
+            file_path = KEYWORDS_DICT_DIR_DEV / filename
+            if file_path.exists():
+                print(f"[INFO] Found keywords dictionary file (DEV): {file_path}")
+                return file_path
     
     print(f"[ERROR] Keywords dictionary file not found")
     return None
@@ -936,7 +938,8 @@ def load_keyword_dictionary(conn: psycopg2_connection):
         "keywords_dict_v2_with_patterns.json",
         "keywords_dict_with_compound.json",
         "keywords_dict_with_synonyms.json",
-        "keywords_dict_v2.json"
+        "keywords_dict_v2.json",
+        "keywords_dict.json",
     ]
     
     keywords_file = None
@@ -948,7 +951,7 @@ def load_keyword_dictionary(conn: psycopg2_connection):
             break
     
     # 개발 경로 확인
-    if not keywords_file:
+    if not keywords_file and KEYWORDS_DICT_DIR_DEV is not None:
         for filename in KEYWORDS_DICT_FILES:
             file_path = KEYWORDS_DICT_DIR_DEV / filename
             if file_path.exists():

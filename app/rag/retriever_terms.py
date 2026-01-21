@@ -131,6 +131,7 @@ def _select_search_mode(terms: List[str]) -> str:
 class SearchContext:
     query_text: str
     filters: Dict[str, object]
+    allow_guide_without_card_match: bool
     card_values: List[str]
     card_terms: List[str]
     intent_terms: List[str]
@@ -148,6 +149,7 @@ class SearchContext:
 def _build_search_context(query: str, routing: Dict[str, object]) -> SearchContext:
     query_text = _build_query_text(query, routing.get("query_template"))
     filters = routing.get("filters") or {}
+    allow_guide_without_card_match = bool(routing.get("allow_guide_without_card_match"))
 
     card_values = _as_list(filters.get("card_name"))
     card_terms = _expand_card_terms(card_values)
@@ -170,6 +172,7 @@ def _build_search_context(query: str, routing: Dict[str, object]) -> SearchConte
     return SearchContext(
         query_text=query_text,
         filters=filters,
+        allow_guide_without_card_match=allow_guide_without_card_match,
         card_values=card_values,
         card_terms=card_terms,
         intent_terms=intent_terms,

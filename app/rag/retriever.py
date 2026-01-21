@@ -7,6 +7,7 @@ from app.rag.retriever_rank import _collect_candidates, _finalize_candidates
 from app.rag.retriever_terms import _build_search_context, _priority_terms
 
 LOG_RETRIEVER_DEBUG = os.getenv("RAG_LOG_RETRIEVER_DEBUG") == "1"
+ENABLE_PRIORITY_TERMS = os.getenv("RAG_ENABLE_PRIORITY_TERMS", "0") == "1"
 
 
 # Router entry
@@ -41,7 +42,7 @@ async def retrieve_multi(
 ) -> List[Dict[str, object]]:
     context = _build_search_context(query, routing)
     fetch_k = _fetch_k(top_k)
-    candidates: List[tuple[int, float, Dict[str, object]]] = []
+    candidates: List[tuple[float, int, Dict[str, object]]] = []
 
     def _fetch_rows(
         safe_table: str,
@@ -70,7 +71,12 @@ async def retrieve_multi(
                 limit=fetch_k,
                 filters=context.filters,
             )
-        if _is_card_table(safe_table) and context.category_terms and context.search_mode in {"ISSUE", "BENEFIT"}:
+        if (
+            ENABLE_PRIORITY_TERMS
+            and _is_card_table(safe_table)
+            and context.category_terms
+            and context.search_mode in {"ISSUE", "BENEFIT"}
+        ):
             priority_terms = _priority_terms(context.category_terms)
             if priority_terms:
                 rows.extend(
@@ -105,7 +111,7 @@ async def retrieve_multi(
         title = doc.get("title")
         return title if title else f"__no_title__{doc.get('table')}:{doc.get('id')}"
 
-    docs = _finalize_candidates(candidates, _doc_key)
+    docs = _finalize_candidates(candidates, _doc_key, context)
     if LOG_RETRIEVER_DEBUG and docs:
         top = docs[0]
         print(

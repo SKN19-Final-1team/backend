@@ -117,6 +117,7 @@ def _is_card_doc(doc: Dict[str, Any]) -> bool:
 
 
 def clean_card_docs(docs: List[Dict[str, Any]], query: str) -> List[Dict[str, Any]]:
+    # Card documents only: guide docs pass through unchanged.
     cleaned: List[Dict[str, Any]] = []
     for doc in docs:
         if not _is_card_doc(doc):
