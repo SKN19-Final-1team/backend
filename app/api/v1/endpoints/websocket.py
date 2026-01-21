@@ -1,3 +1,4 @@
+import os
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 import asyncio
 import uuid
@@ -8,6 +9,7 @@ router = APIRouter()
 
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
+    os.environ.setdefault("RAG_LOG_TIMING", "1")
     await websocket.accept()
     session_id = str(uuid.uuid4())[:8]
     print(f"[{session_id}] 웹소켓 연결 완료")

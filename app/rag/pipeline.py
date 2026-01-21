@@ -13,7 +13,14 @@ from app.rag.cache.card_cache import (
     doc_cache_id,
 )
 from app.rag.postprocess.cards import omit_empty, promote_definition_doc, split_cards_by_query
-from app.rag.postprocess.keywords import collect_query_keywords, normalize_text
+from app.rag.postprocess.sections import clean_card_docs
+from app.rag.postprocess.keywords import (
+    BENEFIT_FILTER_TOKENS,
+    ISSUE_FILTER_TOKENS,
+    collect_query_keywords,
+    normalize_text,
+    text_has_any,
+)
 from app.rag.retriever import retrieve_multi
 from app.rag.router import route_query
 
@@ -22,6 +29,36 @@ from app.llm.sllm_refiner import refine_text
 
 
 LOG_TIMING = os.getenv("RAG_LOG_TIMING", "1") != "0"
+_GUIDE_INTENT_TOKENS = ISSUE_FILTER_TOKENS + BENEFIT_FILTER_TOKENS + (
+    "등록",
+    "인증",
+    "조건",
+    "방법",
+    "다자녀",
+    "다둥이",
+    "청년",
+    "환급",
+)
+
+
+def _text_has_any_compact(text: str, tokens: tuple[str, ...]) -> bool:
+    if text_has_any(text, tokens):
+        return True
+    compact = (text or "").lower().replace(" ", "")
+    return any(token in compact for token in tokens)
+
+
+def _should_expand_card_info(
+    query: str,
+    routing: Dict[str, Any],
+    filters: Dict[str, Any],
+) -> bool:
+    if not filters.get("card_name"):
+        return False
+    db_route = routing.get("db_route")
+    if db_route in ("both", "guide_tbl"):
+        return True
+    return _text_has_any_compact(query, _GUIDE_INTENT_TOKENS)
 
 
 # --- 설정 ---
@@ -69,22 +106,45 @@ async def retrieve(
 ) -> List[Dict[str, Any]]:
     filters = routing.get("filters") or routing.get("boost") or {}
     route_name = routing.get("route") or routing.get("ui_route")
+    db_route = routing.get("db_route")
+    routing_for_retrieve = routing
 
     sources = set()
-    if route_name == "card_info":
-        sources.add("card_tbl")
-    elif filters.get("card_name"):
-        sources.update({"card_tbl", "guide_tbl"})
-    if filters.get("payment_method"):
-        sources.update({"card_tbl", "guide_tbl"})
-    if filters.get("intent") or filters.get("weak_intent"):
-        sources.add("guide_tbl")
+    if db_route == "card_tbl":
+        sources.add("card_products")
+    elif db_route == "guide_tbl":
+        sources.add("service_guide_documents")
+    elif db_route == "both":
+        sources.update({"card_products", "service_guide_documents"})
+
     if not sources:
-        sources.update({"card_tbl", "guide_tbl"})
+        if route_name == "card_info":
+            sources.add("card_products")
+        elif filters.get("card_name"):
+            sources.update({"card_products", "service_guide_documents"})
+    if route_name == "card_info" and _should_expand_card_info(query, routing, filters):
+        sources.update({"card_products", "service_guide_documents"})
+        if "allow_guide_without_card_match" not in routing:
+            routing_for_retrieve = dict(routing)
+            routing_for_retrieve["allow_guide_without_card_match"] = True
+    if (
+        filters.get("card_name")
+        and _text_has_any_compact(query, _GUIDE_INTENT_TOKENS)
+        and "allow_guide_without_card_match" not in routing
+    ):
+        if routing_for_retrieve is routing:
+            routing_for_retrieve = dict(routing)
+        routing_for_retrieve["allow_guide_without_card_match"] = True
+    if filters.get("payment_method"):
+        sources.update({"card_products", "service_guide_documents"})
+    if filters.get("intent") or filters.get("weak_intent"):
+        sources.add("service_guide_documents")
+    if not sources:
+        sources.update({"card_products", "service_guide_documents"})
 
     return await retrieve_multi(
         query=query,
-        routing=routing,
+        routing=routing_for_retrieve,
         tables=sorted(sources),
         top_k=top_k,
     )
@@ -126,6 +186,7 @@ async def run_rag(query: str, config: Optional[RAGConfig] = None) -> Dict[str, A
         }
 
     docs = await retrieve(query=query, routing=routing, top_k=cfg.top_k)
+    docs = clean_card_docs(docs, query)
     t_retrieve = time.perf_counter()
     if routing.get("route") == "card_info":
         docs = promote_definition_doc(docs)
