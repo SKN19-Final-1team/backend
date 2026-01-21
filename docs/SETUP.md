@@ -56,5 +56,5 @@ conda remove -n 삭제할가상환경 --all
 
 # fastapi 실행
 cd app
-uvicorn main:app --reload
+uvicorn app.main:app --reload
 ```
