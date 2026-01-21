@@ -1,47 +1,54 @@
-from fastapi import APIRouter, Request, HTTPException
-from pydantic import BaseModel
-from typing import List
 from app.utils.evaluate_call import evaluate_call
 from app.llm.follow_up.feedback_generator import generate_feedback
+from app.llm.follow_up.summarize_generator import get_summarize    
+from fastapi import APIRouter, UploadFile, File, HTTPException
+import time
 
 router = APIRouter()
 
-# 요약 요청용
-class SummaryRequest(BaseModel):
-    script: str
-
-# 평가 점수 요청용
-class EvaluationRequest(BaseModel):
-    script: str
-    emotions: List[str]
+# 화자 분리 STT
+async def transcribe_audio():
+    # 화자 분리 STT 코드 넣어서 따로 파일로 분리
+    # 현재는 그냥 mockdata 넣기
+    script = "상담사: ▲▲카드 ▲▲▲입니다.\n손님: 예 안녕하세요? 어 저기\n상담사: 네 안녕하십니까?\n손님: ▲▲카드 결 결제하는 그\n손님: 카 저기 결 계좌 이체는 월 변경할려 그러거든요.\n상담사: 결제 계좌를 변경하시겠다 그 말씀이신 거예요?\n손님: 예 예.\n상담사: 알겠습니다. 네 ▲▲▲ 님 본인 맞으십니까?\n손님: 네.\n상담사: 결제 계좌가 저희 쪽에 ▲▲은행 계좌로 등록이 되어 있으신데요. 변경하시고자 하시는 은행명과 계좌 번호 말씀해 주시겠어요, 손님?\n손님: 예.\n손님: ▲▲은행이고요.\n상담사: 네 네.\n손님: 예. ▲▲▲\n상담사: ▲▲▲\n손님: ▲▲▲\n상담사: ▲▲▲\n손님: ▲▲▲\n상담사: ▲▲▲\n손님: ▲▲▲▲\n상담사: ▲▲▲번이요? 말씀해주신 계좌 지금 저희 쪽에서 확인 중에 있습니다. 잠시만 기다려주시겠습니까?\n손님: 예.\n상담사: 네, 손님. 기다려 주셔서 감사합니다. ▲▲카드 이용 대금 출금 이체 계좌 등록에 관한 접수 내용 확인하겠습니다. 생년월일 ▲▲년 ▲▲월 ▲▲일, ▲▲▲ 님 명의로 된 ▲▲은행 ▲▲▲▲▲▲▲▲▲▲▲▲▲ 계좌로\n상담사: 하는 내용이 맞으십니까?\n손님: 네.\n상담사: 확인해주셔서 감사합니다. 요청하신 대로 결제 계좌는 말씀해 주신 ▲▲은행 계좌로 변경 등록 처리해드렸습니다. 그렇기때문에 이 번 ▲▲월 ▲▲일 결제 대금부터는 변경해드린 ▲▲은행 계좌에서 출금 처리가 되는 거고요. 타은행으로 결제\n상담사: 이기 때문에 한도는 결제일 다음 날 원복이 됩니다. 요청하신 대로 결제 계좌는 ▲▲은행 계좌에서 ▲▲은행 계좌로 변경 등록 처리 완료해드렸습니다.\n손님: 네.\n상담사: 감사합니다. 그 외에도 저희 쪽에 장기 카드 대출 등을 이용할 수가 있는데 혹시 카드론 사용 계획은 없으신가요? 유동적이라 변동될 수 있어서요.\n손님: 괜찮습니다.\n상담사: 예 감사합니다. 저는 상담사 ▲▲▲이었습니다."
+    return script
 
 
-# /api/v1/followup/summary
-@router.post("/summary")
-async def create_summary(request: Request, body: SummaryRequest):
-    summarizer = getattr(request.app.state, "summarizer", None)
-    if not summarizer:
-        raise HTTPException(status_code=500, detail="AI 모델 초기화 실패")
-    
-    return summarizer.summarize(body.script)
-
-
-# /api/v1/followup/evaluate
-@router.post("/evaluate")
-async def create_evaluation(body: EvaluationRequest):
+@router.post("/")
+async def create_summary(file: UploadFile = File(...)):
     try:
-        # OpenAI를 통한 피드백 생성
-        feedback = generate_feedback(body.script)
+        # 화자 분리 STT
+        script = await transcribe_audio()
         
-        # 로컬 로직을 통한 정량 점수 계산
-        score = evaluate_call(body.emotions)
+        # 후처리 요약 생성 (Runpod/kanana)
+        summarize_start = time.time()
+        summarize_result = get_summarize(script)
+        summarize_end = time.time()
+        if "error" in summarize_result:
+            raise HTTPException(status_code=500, detail=summarize_result["error"])
+        summarize_time = summarize_end - summarize_start
         
-        final_report = {
-            "feedback" : feedback,
-            "score": score
-            }
         
-        return final_report
+        # 피드백 생성 (OpenAI/GPT)
+        fe_start = time.time()
+        feedback = generate_feedback(script)
+        fe_end = time.time()
+        if isinstance(feedback, str): # 에러 메시지가 문자열로 온 경우
+            raise HTTPException(status_code=500, detail=feedback)
+        fe_time = fe_end - fe_start
+        
+        # 감정 점수 계산 및 병합
+        score = evaluate_call(feedback['emotions'])
+        feedback["emotion_score"] = score.get("emotion_score", 0)
+        
+        print(f"요약 생성 시간 : {summarize_time}, 피드백 생성 시간 : {fe_time}")
+        
+        # 최종 응답
+        return {
+            "status": "success",
+            "summary": summarize_result,
+            "evaluation": feedback
+        }
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
