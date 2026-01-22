@@ -13,5 +13,5 @@ def get_connection():
         return conn
         
     except Exception as e:
-        print(f"❌ DB 연결 실패: {e}")
+        print(f"DB 연결 실패: {e}")
         raise e
