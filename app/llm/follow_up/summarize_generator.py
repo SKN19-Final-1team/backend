@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 import json
 import os
 
-system_prompt = """
+SYSTEM_PROMPT = """
 상담 스크립트를 바탕으로 아래 JSON 형식에 맞춰 응답하세요
 
 ### 제약 사항
@@ -36,7 +36,7 @@ async def get_summarize(script):
         response = await client.chat.completions.create(
             model="local-model",
             messages=[
-                {"role": "system", "content": system_prompt},
+                {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": f"상담 전문:\n{script}"}
             ],
             temperature=0.0,
