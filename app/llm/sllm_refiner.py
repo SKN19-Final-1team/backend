@@ -28,6 +28,11 @@ def refine_text(text: str) -> Dict[str, any]:
     if not text or not text.strip():
         return {"text": text, "keywords": []}
 
+    # 1. 단어 사전 기반 교정 (Dictionary-based Normalization)
+    from app.rag.vocab.keyword_dict import normalize_sentence_with_dict
+    text = normalize_sentence_with_dict(text)
+    print(f"[sLLM] Dictionary normalized text: {text}")
+
     try:
         system_prompt = """금융 텍스트 교정. 발음 뭉개짐, 띄어쓰기 오류, 맞춤법 오류, 오타 수정. 아래 출력 형식 외 부연설명 절대 금지
 [출력 형식]
