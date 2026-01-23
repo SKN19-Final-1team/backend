@@ -1,9 +1,11 @@
 from app.utils.evaluate_call import evaluate_call
 from app.llm.follow_up.feedback_generator import generate_feedback
-from app.llm.follow_up.summarize_generator import get_summarize    
+from app.llm.follow_up.summarize_generator import get_summarize
+from app.llm.follow_up.personality_generator import get_personality, determine_personality
 from fastapi import APIRouter, UploadFile, File, HTTPException
 import time
 import asyncio
+from pydantic import BaseModel
 
 router = APIRouter()
 
@@ -52,3 +54,37 @@ async def create_summary(file: UploadFile = File(...)):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+class SaveConsultationRequest(BaseModel):
+    customer_id: int      # 고객 ID
+    transcript: str       # 화자 분리된 전문
+    summary: dict         # 수정된 요약본
+    evaluation: dict      # 피드백/감정
+
+
+@router.post("/save")
+async def save_consultation(data: SaveConsultationRequest):
+    try:
+        # DB에서 최근 성향 이력 2개 조회 코드 추가
+        # mockdata
+        past_history = ["N1", "S2"] 
+        
+        # 현재 상담에서의 고객 성향 분석
+        current_personality = await get_personality(data.transcript)
+        
+        # 최종 성향 확정 (과거 2개 + 현재 1개)
+        total_history = (past_history + [current_personality])[-3:]
+        final_personality = determine_personality(total_history)
+        
+        # DB 저장 코드 추가
+        print(f"고객 {data.customer_id} 성향 업데이트: {final_personality}")
+
+        return {
+            "status": "success",
+            "current_personality": current_personality,
+            "final_personality": final_personality,
+            "message": "상담 내역 및 고객 성향이 저장되었습니다."
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"저장 중 오류 발생: {str(e)}")
