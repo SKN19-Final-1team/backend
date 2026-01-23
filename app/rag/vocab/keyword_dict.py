@@ -18,7 +18,21 @@ ROUTE_CARD_INFO = "card_info"
 ROUTE_CARD_USAGE = "card_usage"
 
 # ACTION 중에서도 즉시 대응 가능한 intent만 허용
-ACTION_ALLOWLIST = {"분실", "분실도난"}
+ACTION_ALLOWLIST = {"분실", "분실도난", "오류"}
+
+# 문제/오류 관련 intent (고급 검색용)
+ERROR_INTENT_SYNONYMS: Dict[str, List[str]] = {
+    "오류": ["에러", "오류가", "오류다", "에러가", "에러네", "안돼", "안돼요", "안되네", "안됨", "불가", "되지않음", "작동안함", "작동안돼", "등록안돼", "등록안됨", "결제안돼", "결제오류", "승인안됨", "인증안됨"],
+}
+
+# 애플페이 전용 intent (source-specific routing용)
+APPLEPAY_INTENT_SYNONYMS: Dict[str, List[str]] = {
+    "applepay_add_card": ["등록", "추가", "카드추가", "카드등록", "지갑추가", "카드를 추가", "카드 추가", "카드 등록"],
+    "applepay_payment": ["결제", "오프라인", "온라인", "할부", "취소", "리더기", "태그", "NFC"],
+    "applepay_transport": ["티머니", "교통", "충전", "교통카드", "탑승", "익스프레스", "버스", "지하철"],
+    "applepay_where_to_use": ["사용처", "어디서", "가능", "매장", "이용처", "가능 지점", "가맹점"],
+    "applepay_security": ["분실", "도난", "보안", "삭제", "비밀번호", "분실모드"],
+}
 
 # 결제 수단 관련 키워드 (사전에서 누락된 항목 보완)
 PAYMENT_SYNONYMS: Dict[str, List[str]] = {
@@ -226,6 +240,9 @@ def get_card_name_synonyms() -> Dict[str, List[str]]:
 
 ACTION_SYNONYMS = get_action_synonyms()
 WEAK_INTENT_SYNONYMS = get_weak_intent_synonyms()
+
+# ERROR_INTENT_SYNONYMS를 ACTION_SYNONYMS에 병합 - 안돼요/오류 등을 action으로 인식
+ACTION_SYNONYMS.update(ERROR_INTENT_SYNONYMS)
 
 
 def get_vocab_groups() -> List[Dict[str, object]]:
