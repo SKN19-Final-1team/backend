@@ -75,7 +75,6 @@ def _strip_particle(term: str) -> str:
 
 
 def normalize_text(text: str) -> str:
-    # Normalize case, remove symbols (keep letters/digits/Korean), and collapse whitespace.
     normalized = text.strip().lower()
     normalized = _TERM_CLEAN_RE.sub(" ", normalized)
     return _TERM_WS_RE.sub(" ", normalized).strip()

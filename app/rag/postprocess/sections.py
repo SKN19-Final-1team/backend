@@ -75,7 +75,7 @@ def _query_section_terms(query: str) -> List[str]:
     filtered = [t for t in terms if t in _SECTION_HINTS]
     if filtered:
         return filtered
-    # fallback: use any short tokens in query
+
     return [t for t in terms if len(t) <= 6]
 
 
@@ -117,7 +117,7 @@ def _is_card_doc(doc: Dict[str, Any]) -> bool:
 
 
 def clean_card_docs(docs: List[Dict[str, Any]], query: str) -> List[Dict[str, Any]]:
-    # Card documents only: guide docs pass through unchanged.
+
     cleaned: List[Dict[str, Any]] = []
     for doc in docs:
         if not _is_card_doc(doc):
