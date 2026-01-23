@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Dict, List
 import re
 
-from app.rag.retriever_config import (
+from app.rag.retriever.config import (
     BENEFIT_TERMS,
     CATEGORY_MATCH_TOKENS,
     ISSUE_TERMS,
@@ -19,6 +19,25 @@ from app.rag.vocab.keyword_dict import (
 
 _STOPWORDS_LOWER = {word.lower() for word in STOPWORDS}
 _TERM_WS_RE = re.compile(r"\s+")
+_TERM_SEP_RE = re.compile(r"[\s\-/·]+")
+_GUIDE_GENERIC_TERMS = {
+    "카드",
+    "카드사",
+    "서비스",
+    "이용",
+    "방법",
+    "안내",
+    "문의",
+}
+_GUIDE_INTENT_SAFE_TERMS = {
+    "분실도난": [
+        "분실",
+        "도난",
+        "잃어버",
+        "분실신고",
+        "도난신고",
+    ],
+}
 
 
 def _as_list(value: object | None) -> List[str]:
@@ -49,6 +68,45 @@ def _expand_no_space_terms(terms: List[str]) -> List[str]:
     return out
 
 
+def _normalize_term_key(term: str) -> str:
+    return _TERM_SEP_RE.sub("", term.strip().lower())
+
+
+def _expand_loss_separator_variants(term: str) -> List[str]:
+    compact = _normalize_term_key(term)
+    if "분실" not in compact or "도난" not in compact:
+        return []
+    if compact not in ("분실도난", "도난분실"):
+        return []
+    return [
+        "분실 도난",
+        "분실·도난",
+        "분실/도난",
+        "분실-도난",
+        "도난 분실",
+        "도난·분실",
+        "도난/분실",
+        "도난-분실",
+    ]
+
+
+def _filter_generic_guide_terms(terms: List[str]) -> List[str]:
+    if len(terms) <= 1:
+        return terms
+    filtered = [
+        term
+        for term in terms
+        if _normalize_term_key(term) not in _GUIDE_GENERIC_TERMS
+    ]
+    return filtered or terms
+
+
+def _filter_guide_query_terms(terms: List[str]) -> List[str]:
+    if not terms:
+        return []
+    return _filter_generic_guide_terms(terms)
+
+
 def _expand_payment_terms(terms: List[str]) -> List[str]:
     expanded = []
     for canonical in terms:
@@ -70,6 +128,43 @@ def _expand_action_terms(terms: List[str]) -> List[str]:
     for canonical in terms:
         expanded.extend(ACTION_SYNONYMS.get(canonical, []))
     return _unique_in_order([*terms, *expanded])
+
+
+def _expand_guide_terms(terms: List[str]) -> List[str]:
+    if not terms:
+        return []
+    normalized_keys = {_normalize_term_key(term) for term in terms if term}
+    safe_terms: List[str] = []
+    safe_keys = { _normalize_term_key(canon) for canon in _GUIDE_INTENT_SAFE_TERMS.keys() }
+    for canonical, terms_list in _GUIDE_INTENT_SAFE_TERMS.items():
+        if _normalize_term_key(canonical) in normalized_keys:
+            safe_terms.extend(terms_list)
+    if safe_terms:
+        expanded = [
+            term
+            for term in terms
+            if _normalize_term_key(term) in safe_keys
+        ]
+        expanded = _unique_in_order([*expanded, *safe_terms])
+    else:
+        expanded = _unique_in_order(_expand_action_terms(terms))
+
+    normalized: List[str] = []
+    for term in expanded:
+
+        if term in {"분실", "도난", "분실도난", "도난분실", "잃어버", "분실/도난", "분실·도난", "분실-도난", "분실 도난", "도난 분실"}:
+            if "분실도난" not in normalized:
+                normalized.append("분실도난")
+        else:
+            normalized.append(term)
+        compact = _normalize_term_key(term)
+        if compact and compact != term and compact not in normalized:
+            normalized.append(compact)
+        for v in _expand_loss_separator_variants(term):
+            if v not in normalized:
+                normalized.append(v)
+    normalized = _unique_in_order(normalized)[:3]
+    return _filter_generic_guide_terms(normalized)
 
 
 def _expand_weak_terms(terms: List[str]) -> List[str]:
@@ -132,6 +227,8 @@ class SearchContext:
     query_text: str
     filters: Dict[str, object]
     allow_guide_without_card_match: bool
+    card_name_matched: bool
+    route_name: str
     card_values: List[str]
     card_terms: List[str]
     intent_terms: List[str]
@@ -150,6 +247,7 @@ def _build_search_context(query: str, routing: Dict[str, object]) -> SearchConte
     query_text = _build_query_text(query, routing.get("query_template"))
     filters = routing.get("filters") or {}
     allow_guide_without_card_match = bool(routing.get("allow_guide_without_card_match"))
+    route_name = str(routing.get("route") or routing.get("ui_route") or "")
 
     card_values = _as_list(filters.get("card_name"))
     card_terms = _expand_card_terms(card_values)
@@ -173,6 +271,8 @@ def _build_search_context(query: str, routing: Dict[str, object]) -> SearchConte
         query_text=query_text,
         filters=filters,
         allow_guide_without_card_match=allow_guide_without_card_match,
+        card_name_matched=bool(card_values),
+        route_name=route_name,
         card_values=card_values,
         card_terms=card_terms,
         intent_terms=intent_terms,

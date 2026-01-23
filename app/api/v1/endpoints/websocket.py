@@ -15,6 +15,7 @@ async def websocket_endpoint(websocket: WebSocket):
     print(f"[{session_id}] 웹소켓 연결 완료")
 
     whisper_service = WhisperService()
+    session_state = {}
 
     # 결과 처리 콜백
     async def on_transcription_result(text: str):
@@ -22,7 +23,11 @@ async def websocket_endpoint(websocket: WebSocket):
         # await websocket.send_json(text)
 
         try:
-            result = await run_rag(text, config=RAGConfig(top_k=4, normalize_keywords=True))
+            result = await run_rag(
+                text,
+                config=RAGConfig(top_k=4, normalize_keywords=True),
+                session_state=session_state,
+            )
             
             if result:
                 print(f"[{session_id}] RAG 검색 결과 : {result}")

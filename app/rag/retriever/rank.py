@@ -2,16 +2,21 @@ import os
 import re
 from typing import Dict, List, Optional, Tuple
 
-from app.rag.retriever_config import (
+from app.rag.retriever.config import (
     CARD_META_WEIGHT,
     KEYWORD_STOPWORDS,
     MIN_GUIDE_CONTENT_LEN,
     RRF_K,
 )
-from app.rag.retriever_db import _is_guide_table, text_search
-from app.rag.retriever_terms import SearchContext, _unique_in_order
+from app.rag.retriever.db import _is_guide_table, text_search
+from app.rag.retriever.terms import SearchContext, _unique_in_order
 
-_BOOST_ENABLED = os.getenv("RAG_RRF_BOOST", "1") != "0"
+USE_VECTOR = os.getenv("RAG_USE_VECTOR", "1") != "0"
+USE_KEYWORD = os.getenv("RAG_USE_KEYWORD", "1") != "0"
+USE_RRF = os.getenv("RAG_USE_RRF", "1") != "0"
+USE_BONUS = os.getenv("RAG_USE_BONUS", "1") != "0"
+
+_BOOST_ENABLED = (os.getenv("RAG_RRF_BOOST", "1") != "0") and USE_BONUS
 _BOOST_CARD = float(os.getenv("RAG_RRF_BOOST_CARD", "0.2"))
 _BOOST_CARD_GUIDE_REDUCE = float(os.getenv("RAG_RRF_BOOST_CARD_REDUCE", "1.0"))
 _BOOST_INTENT = float(os.getenv("RAG_RRF_BOOST_INTENT", "0.15"))
@@ -20,7 +25,9 @@ _BOOST_WEAK = float(os.getenv("RAG_RRF_BOOST_WEAK", "0.05"))
 _BOOST_CATEGORY = float(os.getenv("RAG_RRF_BOOST_CATEGORY", "0.05"))
 _BOOST_GUIDE = float(os.getenv("RAG_RRF_BOOST_GUIDE", "0.004"))
 _BOOST_GUIDE_COVERAGE = float(os.getenv("RAG_RRF_BOOST_GUIDE_COVERAGE", "0.01"))
+_BOOST_INTENT_TITLE = float(os.getenv("RAG_RRF_BOOST_INTENT_TITLE", "0.02"))
 _PENALTY_CARD_GUIDE = float(os.getenv("RAG_RRF_PENALTY_CARD_GUIDE", "0.06"))
+_CARD_TOP_BONUS = float(os.getenv("RAG_CARD_TOP_BONUS", "0.6"))
 _BOOST_GUIDE_TOKENS = tuple(
     token.strip()
     for token in os.getenv(
@@ -196,6 +203,19 @@ def _guide_tokens(context: SearchContext) -> List[str]:
     return tokens
 
 
+def _intent_title_terms(intent_terms: List[str]) -> List[str]:
+    if not intent_terms:
+        return []
+    expanded: List[str] = []
+    for term in intent_terms:
+        expanded.append(term)
+        if "분실" in term:
+            expanded.append("분실")
+        if "도난" in term:
+            expanded.append("도난")
+    return _unique_in_order(expanded)
+
+
 def _normalize_doc_fields(
     content: str,
     metadata: Optional[object],
@@ -242,7 +262,8 @@ def _score_candidate(
     title = doc.get("title")
     meta = doc.get("metadata") or {}
     content = doc.get("content") or ""
-    card_meta_score = _card_meta_score(meta, context.card_values)
+    route_name = context.route_name
+    card_meta_score = _card_meta_score(meta, context.card_values) if context.card_name_matched else 0
     card_match_base = card_meta_score > 0 or _card_term_match(
         title,
         content,
@@ -254,6 +275,13 @@ def _score_candidate(
         doc["card_match"] = card_match_base
     else:
         doc["card_match"] = True
+    # card_info일 때 카드명(정확/정규화)과 query 토큰이 일치하면 소량 보너스
+    if route_name == "card_info" and doc.get("table") == "card_products" and context.card_values:
+        norm_card_values = {_normalize_card_text(v) for v in context.card_values if v}
+        norm_terms = [_normalize_card_text(t) for t in context.query_terms if t]
+        if norm_card_values and norm_terms:
+            if any(t and t in norm_card_values for t in norm_terms):
+                card_meta_score += 3
     boost_score = 0.0
     if _BOOST_ENABLED:
         guide_tokens = _guide_tokens(context)
@@ -266,11 +294,19 @@ def _score_candidate(
                 if guide_tokens and not is_guide_doc:
                     card_boost *= max(0.0, 1.0 - _BOOST_CARD_GUIDE_REDUCE)
                 boost_score += card_boost
+            if is_guide_doc and context.card_values:
+                guide_card_score = _card_meta_score(meta, context.card_values) if context.card_name_matched else 0
+                if guide_card_score > 0:
+                    boost_score += 0.25
             if context.intent_terms and (
                 _title_match_score(title, context.intent_terms, 1)
                 or _content_match_score(content, context.intent_terms, 1)
             ):
                 boost_score += _BOOST_INTENT
+            if _BOOST_INTENT_TITLE > 0 and is_guide_doc and context.intent_terms:
+                intent_title_terms = _intent_title_terms(context.intent_terms)
+                if _title_match_score(title, intent_title_terms, 1):
+                    boost_score += _BOOST_INTENT_TITLE
             if context.payment_terms and (
                 _title_match_score(title, context.payment_terms, 1)
                 or _content_match_score(content, context.payment_terms, 1)
@@ -281,6 +317,13 @@ def _score_candidate(
                 or _content_match_score(content, context.weak_terms, 1)
             ):
                 boost_score += _BOOST_WEAK
+            if (
+                is_guide_doc
+                and doc.get("id")
+                and "예약신청" in str(doc.get("id"))
+                and any(term for term in context.intent_terms + context.weak_terms if term)
+            ):
+                boost_score += 1.2
             if context.category_terms and _category_match_score(meta, context.category_terms) > 0:
                 boost_score += _BOOST_CATEGORY
             if _BOOST_GUIDE > 0 and is_guide_doc and context.card_values and card_match_base:
@@ -293,6 +336,9 @@ def _score_candidate(
             if guide_tokens and not is_guide_doc and context.card_values and card_match_base:
                 boost_score -= _PENALTY_CARD_GUIDE
     doc["rrf_boost"] = boost_score
+    # 카드명 매칭이 있는 카드 상품은 card_info 시나리오에서 밀리지 않도록 추가 보너스
+    if context.card_values and str(doc.get("table")) == "card_products" and card_match_base:
+        boost_score += _CARD_TOP_BONUS
     final_score = rrf_score + boost_score
     doc["score"] = final_score
     doc["rrf_score"] = rrf_score
@@ -305,6 +351,8 @@ def _keyword_rows(
     context: SearchContext,
     limit: int,
 ) -> List[Tuple[object, str, Dict[str, object], float]]:
+    if not USE_KEYWORD:
+        return []
     def _build_extra_terms(ctx: SearchContext) -> List[str]:
         terms: List[str] = list(ctx.extra_terms)
         if ctx.category_terms:
@@ -331,6 +379,10 @@ def _build_candidates_from_rows(
     table: str,
     context: SearchContext,
 ) -> List[Tuple[float, int, Dict[str, object]]]:
+    if not USE_VECTOR:
+        vec_rows = []
+    if not USE_KEYWORD:
+        kw_rows = []
     vec_docs, vec_rank = _rows_to_docs(vec_rows, table, use_vector_score=True)
     kw_docs, kw_rank = _rows_to_docs(kw_rows, table, use_vector_score=False)
 
@@ -340,10 +392,16 @@ def _build_candidates_from_rows(
         if not doc:
             continue
         rrf_score = 0.0
-        if key in vec_rank:
-            rrf_score += 1.0 / (RRF_K + vec_rank[key])
-        if key in kw_rank:
-            rrf_score += 1.0 / (RRF_K + kw_rank[key])
+        if USE_RRF:
+            if key in vec_rank:
+                rrf_score += 1.0 / (RRF_K + vec_rank[key])
+            if key in kw_rank:
+                rrf_score += 1.0 / (RRF_K + kw_rank[key])
+        else:
+            if key in vec_docs and USE_VECTOR:
+                rrf_score = float(doc.get("vector_score", 0.0))
+            elif key in kw_rank and USE_KEYWORD:
+                rrf_score = 1.0 / max(1, kw_rank[key])
         title_score, final_score = _score_candidate(doc, context, rrf_score)
         candidates.append((final_score, title_score, doc))
 
