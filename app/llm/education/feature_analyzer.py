@@ -80,22 +80,7 @@ JSON 형식으로만 출력하세요."""
     return result
 
 
-def analyze_multiple_consultations(consultations: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """
-    여러 상담 기록을 종합 분석 (상급 난이도용)
-    
-    Args:
-        consultations: 상담 기록 리스트 (각각 "content" 필드 포함)
-        
-    Returns:
-        종합 분석 결과
-    """
-    # 여러 상담을 합쳐서 더 정확한 분석
-    combined_content = "\n\n=== 다음 상담 ===\n\n".join(
-        [c.get("content", "") for c in consultations]
-    )
-    
-    return analyze_consultation(combined_content[:4000])  # 토큰 제한 고려
+
 
 
 def format_analysis_for_db(analysis: Dict[str, Any]) -> Dict[str, Any]:
