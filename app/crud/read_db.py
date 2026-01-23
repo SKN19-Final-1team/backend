@@ -1,11 +1,6 @@
 import sys
 import os
 
-# 스크립트로 직접 실행 시 backend 경로를 sys.path에 추가하여 app 패키지를 찾을 수 있게 함
-current_dir = os.path.dirname(os.path.abspath(__file__))
-backend_dir = os.path.dirname(os.path.dirname(current_dir))
-sys.path.append(backend_dir)
-
 from app.db.base import get_connection
 import psycopg2.extras
 
