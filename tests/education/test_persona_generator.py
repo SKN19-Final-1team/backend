@@ -9,7 +9,7 @@ def test_persona_generation():
     """샘플 고객 데이터로 페르소나 생성 테스트"""
     
     # customer.json에서 몇 가지 샘플 로드
-    with open("tests/education/customer.json", "r", encoding="utf-8") as f:
+    with open("customer.json", "r", encoding="utf-8") as f:
         customers = json.load(f)
     
     print("=" * 60)

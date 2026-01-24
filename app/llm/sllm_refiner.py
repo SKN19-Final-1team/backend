@@ -10,18 +10,13 @@ _model_loaded = False
 _model_load_failed = False
 
 # RunPod API 설정
-RUNPOD_IP = "213.192.2.88"
-RUNPOD_PORT = "40070"
-RUNPOD_API_KEY = "0211"
+RUNPOD_IP = os.getenv("RUNPOD_IP")
+RUNPOD_PORT = os.getenv("RUNPOD_PORT")
+RUNPOD_API_KEY = os.getenv("RUNPOD_API_KEY")
 RUNPOD_MODEL_NAME = "kanana-nano-2.1b-instruct"
 
 RUNPOD_API_URL = f"http://{RUNPOD_IP}:{RUNPOD_PORT}/v1/chat/completions"
 _session = requests.Session()
-
-# 로컬 모델 경로 설정
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-# MODEL_PATH = os.path.join(BASE_DIR, "tests", "models", "kanana-nano-2.1b-instruct.Q4_K_M.gguf")
-# MODEL_PATH = os.path.join(BASE_DIR, "tests", "models", "EXAONE-3.5-2.4B-Instruct-Q4_K_M.gguf")
 
 def refine_text(text: str) -> Dict[str, any]:
     # 텍스트가 비어있다면 원본 반환

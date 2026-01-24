@@ -1,11 +1,11 @@
+import os
 import json
 import requests
 from typing import Optional, Dict, Any
 
-# RunPod API 설정 (sllm_refiner.py 참고)
-RUNPOD_IP = "213.192.2.88"
-RUNPOD_PORT = "40070"
-RUNPOD_API_KEY = "0211"
+RUNPOD_IP = os.getenv("RUNPOD_IP")
+RUNPOD_PORT = os.getenv("RUNPOD_PORT")
+RUNPOD_API_KEY = os.getenv("RUNPOD_API_KEY")
 RUNPOD_MODEL_NAME = "kanana-nano-2.1b-instruct"
 
 RUNPOD_API_URL = f"http://{RUNPOD_IP}:{RUNPOD_PORT}/v1/chat/completions"
@@ -54,7 +54,9 @@ def generate_text(
     }
     
     try:
+        print(f"[LLM Client] 요청 시작: {RUNPOD_API_URL}")
         response = _session.post(RUNPOD_API_URL, json=payload, headers=headers, timeout=30)
+        print(f"[LLM Client] 응답 수신: {response.status_code}")
         
         if response.status_code != 200:
             print(f"[LLM Client] API 오류 ({response.status_code}): {response.text}")
@@ -66,13 +68,13 @@ def generate_text(
         return output
         
     except requests.exceptions.RequestException as e:
-        print(f"[LLM Client] 네트워크 오류: {e}")
+        print(f"[LLM Client] 네트워크 오류 발생: {e}")
         return ""
     except (KeyError, IndexError) as e:
         print(f"[LLM Client] 응답 구조 오류: {e}")
         return ""
     except Exception as e:
-        print(f"[LLM Client] 처리 중 오류: {e}")
+        print(f"[LLM Client] 알 수 없는 오류: {e}")
         import traceback
         traceback.print_exc()
         return ""

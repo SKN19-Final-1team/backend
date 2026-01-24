@@ -12,7 +12,7 @@ def test_with_sample_consultation():
     """샘플 상담 데이터로 feature analyzer 테스트"""
     
     # consultation.json 로드
-    with open("tests/education/consultation.json", "r", encoding="utf-8") as f:
+    with open("consultation.json", "r", encoding="utf-8") as f:
         consultation = json.load(f)
     
     print("=" * 60)
