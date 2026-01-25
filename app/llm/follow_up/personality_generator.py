@@ -2,24 +2,24 @@ from openai import AsyncOpenAI
 from dotenv import load_dotenv
 import os
 from collections import Counter
+import time
 
 SYSTEM_PROMPT = """
-상담 스크립트에서 고객의 성향을 분류하세요.
-전체적인 맥락을 참고하되 판단의 근거는 고객의 발화에 한정합니다.
+상담 스크립트에서 고객의 성향을 분류하세요
+전체적인 맥락을 참고하되 판단의 근거는 고객의 발화에 한정합니다
 
 ### 분류 규칙
 1. 제시된 성향 키워드 중 가장 적절한 한가지만 선택
-2. 오직 키워드만 추출 (예: N3)
+2. 설명이나 판단 근거는 절대 출력하지말고 오직 하나의 키워드만 출력한다
+3. 여러 개의 성향을 가질 경우 S3 > S2 > S1 > N3 > N2 > N1 의 순서로 우선 순위를 가진다
 
 ### 성향 키워드 목록
-- N1 (실용주의형): 불필요한 말 없이 바로 문의사항을 말함 
-- N2 (친화적수다형): 사적인 이야기나 본인 상황을 길게 설명함 
-- N3 (신중/보안 중시형): 신중하고 의심을 보임 
-- S1 (급한성격형): 빠른 처리를 선호함 
-- S2 (꼼꼼상세형): 상세한 설명을 요구함 
-- S3 (이해부족형): 설명을 잘 이해하지 못하여 반복적으로 확인함 
-- S4 (반복민원형): 과거의 상담 이력을 언급하며 해결되지 않은 불만을 제기함 
-- S5 (불만형): 분노, 짜증을 드러냄
+- N1: 실용주의형. 불필요한 말 없이 바로 문의사항을 말함
+- N2: 수다형. 사적인 이야기나 본인 상황을 길게 설명함
+- N3: 신중형. 신중하고 의심을 보임
+- S1: 급한성격형. 빠른 처리를 선호함
+- S2: 이해부족형. 설명을 잘 이해하지 못하여 반복적으로 확인함
+- S3: 불만형. 분노, 짜증을 드러냄
 """
 
 load_dotenv()
@@ -31,15 +31,35 @@ client = AsyncOpenAI(
 
 async def get_personality(script):
     try:
+        start = time.perf_counter()
+        
         response = await client.chat.completions.create(
-            model="ansui/qwen2.5-3b-customer-analysis-merged",
+            model="ansui/exaone-customer-analysis-merged",
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": f"상담 전문:\n{script}"}
+                {"role": "user", "content": script}
             ],
             temperature=0.0,
+            max_tokens=10,
+            # [| 문자가 나타나면 바로 멈추도록 stop 추가
+            stop=["[|", "[|end|]", "[|user|]", "\n"] 
         )
-        return response.choices[0].message.content.strip()
+        
+        result = response.choices[0].message.content.strip()
+        
+        # 특수 토큰 파편 제거
+        if "[" in result:
+            result = result.split("[")[0].strip()
+            
+        # 혹시나 포함되어 있을 수 있는 태그 추가 정제
+        result = result.replace("[|assistant|]", "").replace("[|end|]", "").strip()
+
+        end = time.perf_counter()
+        latency = end - start
+
+        print(f"Latency: {latency:.4f}s | Result: {result}")
+        
+        return result
 
     except Exception as e:
         print(f"런팟 통신 실패: {str(e)}")
