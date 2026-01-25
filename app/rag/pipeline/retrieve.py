@@ -8,6 +8,7 @@ from app.rag.pipeline.utils import GUIDE_INTENT_TOKENS, should_expand_card_info,
 from app.rag.policy.policy_pins import POLICY_PINS
 from app.rag.retriever.retriever import retrieve_multi
 from app.rag.retriever.db import fetch_docs_by_ids
+from app.rag.retriever.consult_retriever import retrieve_consult_docs
 
 
 DOCUMENT_SOURCE_POLICY_MAP = {
@@ -243,3 +244,28 @@ async def retrieve_docs(
         f"[pipeline_retrieve] retrieve_ms={elapsed_ms:.1f} doc_count={total_docs} route={route_name}"
     )
     return pinned_docs + filtered_docs
+
+
+async def retrieve_consult_cases(
+    query: str,
+    routing: Dict[str, Any],
+    top_k: int,
+) -> List[Dict[str, Any]]:
+    if not routing.get("need_consult_case_search"):
+        return []
+    try:
+        matched = routing.get("matched") or {}
+        intent = None
+        actions = matched.get("actions") or []
+        if actions:
+            intent = str(actions[0])
+        categories = routing.get("consult_category_candidates") or []
+        return retrieve_consult_docs(
+            query_text=query,
+            intent=intent,
+            categories=categories,
+            top_k=top_k,
+        )
+    except Exception as exc:
+        print(f"[pipeline_retrieve][consult] error={exc}")
+        return []

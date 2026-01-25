@@ -3,7 +3,7 @@ import os
 import time
 from typing import Any, Dict, List, Optional
 
-from app.llm.card_generator import generate_detail_cards
+from app.llm.rag_llm.card_generator import generate_detail_cards
 from app.rag.cache.card_cache import (
     CARD_CACHE_ENABLED,
     build_card_cache_key,
@@ -17,20 +17,23 @@ from app.rag.cache.retrieval_cache import (
     retrieval_cache_get,
     retrieval_cache_set,
 )
-from app.rag.pipeline.retrieve import retrieve_docs
+from app.rag.pipeline.retrieve import retrieve_consult_cases, retrieve_docs
 from app.rag.pipeline.utils import (
     apply_session_context,
     build_retrieve_cache_entries,
     docs_from_retrieve_cache,
     format_ms,
+    should_search_consult_cases,
     strict_guidance_script,
 )
+from app.rag.postprocess.guide_script import build_guide_script_message
+from app.llm.rag_llm.guidance_script_generator import generate_guidance_script_from_consult
 from app.rag.postprocess.cards import omit_empty, promote_definition_doc, split_cards_by_query
 from app.rag.postprocess.keywords import collect_query_keywords, normalize_text
 from app.rag.postprocess.sections import clean_card_docs
 from app.rag.router.router import route_query
 from app.rag.policy.policy_pins import POLICY_PINS
-from app.llm.card_generator import build_rule_cards
+from app.llm.rag_llm.card_generator import build_rule_cards
 
 # --- sLLM을 사용한 텍스트 교정 및 키워드 추출 ---
 # NOTE: sLLM 적용은 잠시 비활성화(주석 처리) 상태.
@@ -118,6 +121,8 @@ async def run_rag(
         else:
             retrieve_cache_status = "miss"
 
+    consult_docs: List[Dict[str, Any]] = []
+    consult_guidance_script = ""
     if retrieve_cache_status not in ("hit(mem)", "hit(redis)"):
         docs = await retrieve_docs(query=query, routing=routing, top_k=cfg.top_k)
         if RETRIEVE_CACHE_ENABLED and cache_key:
@@ -126,6 +131,10 @@ async def run_rag(
                 await retrieval_cache_set(cache_key, entries)
                 if retrieve_cache_status == "off":
                     retrieve_cache_status = "miss"
+    if should_search_consult_cases(query, routing, session_state):
+        consult_docs = await retrieve_consult_cases(query=query, routing=routing, top_k=cfg.top_k)
+        if consult_docs and os.getenv("RAG_GUIDANCE_FROM_CONSULT_LLM", "1") != "0":
+            consult_guidance_script = generate_guidance_script_from_consult(query, consult_docs, cfg.model)
 
     docs = clean_card_docs(docs, query)
     t_retrieve = time.perf_counter()
@@ -171,7 +180,7 @@ async def run_rag(
         )
     t_cards = time.perf_counter()
 
-    if cfg.strict_guidance_script:
+    if cfg.strict_guidance_script and not consult_guidance_script:
         guidance_script = strict_guidance_script(guidance_script, docs)
     query_keywords = collect_query_keywords(query, routing, cfg.normalize_keywords)
     for card in cards:
@@ -196,15 +205,24 @@ async def run_rag(
             f"docs={len(docs)} route={routing.get('route')}{cache_label}{retrieve_label}"
         )
 
+    if consult_guidance_script:
+        guidance_script = consult_guidance_script
+        guide_script_message = consult_guidance_script
+    else:
+        guide_script_message = build_guide_script_message(docs, consult_docs, guidance_script)
+    if guide_script_message:
+        guidance_script = guide_script_message
     response = {
         "currentSituation": current_cards,
         "nextStep": next_cards,
         "guidanceScript": guidance_script or "",
+        "guide_script": {"message": guide_script_message},
         "routing": routing,
         "meta": {"model": cfg.model, "doc_count": len(docs), "context_chars": 0},
     }
     if cfg.include_docs:
         response["docs"] = docs
+        response["consult_docs"] = consult_docs
     if sllm_keywords:
         response["sllm_keywords"] = sllm_keywords
     return response

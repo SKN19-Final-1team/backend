@@ -28,8 +28,7 @@ DOC_SUMMARY_PROMPT_VERSION = os.getenv("RAG_DOC_SUMMARY_PROMPT_VERSION", "v1")
 MAX_CARD_DOC_CHARS = DOC_SNIPPET_CHARS
 CARD_RETRY_BACKOFF_SEC = 0.6
 CARD_PROMPT_VERSION = os.getenv("RAG_CARD_PROMPT_VERSION", "v2-content-only")
-DOC_SUMMARY_CACHE_ENABLED = False  # doc summary cache removed; keep flag for compatibility
-
+DOC_SUMMARY_CACHE_ENABLED = False 
 def build_doc_summary_cache_key(*args, **kwargs):
     return None
 
@@ -102,7 +101,6 @@ def _extract_query_terms(query: str) -> List[str]:
 def _extract_relevant_snippets(query: str, content: str, limit: int) -> str:
     if not content:
         return ""
-    # Remove noisy tail sections and contact-heavy lines before extraction.
     cleaned_lines = []
     for line in content.splitlines():
         stripped = line.strip()
@@ -168,7 +166,6 @@ def _build_rule_summary(query: str, content: str) -> str:
 
 
 def build_rule_cards(query: str, docs: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], str]:
-    """LLM을 거치지 않고 룰 기반 요약만으로 카드 생성."""
     if not docs:
         return [], ""
     cards = [_base_card(doc) for doc in docs]
@@ -308,7 +305,6 @@ def generate_detail_cards(
             else:
                 cache_miss += 1
 
-    # Fill non-cached cards with rule-based summaries so non-LLM docs stay relevant.
     for idx, doc in enumerate(docs):
         doc_id = str((doc.get("metadata") or {}).get("id") or doc.get("id") or "")
         if doc_id in cached_doc_ids:

@@ -22,11 +22,56 @@ class RouterResult:
     document_sources: list
     exclude_sources: list
     document_source_policy: str
+    need_consult_case_search: bool
+    consult_category_candidates: list
+    consult_keyword_hits: int
+
+
+_CONSULT_DOMAIN_KEYWORDS = {
+    "분실",
+    "재발급",
+    "승인",
+    "취소",
+    "수수료",
+    "한도",
+    "현금서비스",
+    "카드론",
+    "리볼빙",
+    "결제",
+    "오류",
+    "에러",
+    "불가",
+    "거절",
+}
+
+
+def _count_domain_keyword_hits(normalized: str) -> int:
+    if not normalized:
+        return 0
+    hits = {term for term in _CONSULT_DOMAIN_KEYWORDS if term in normalized}
+    return len(hits)
+
+
+def _build_consult_category_candidates(signals: Signals) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for items in (signals.actions, signals.weak_intents, signals.pattern_hits):
+        for item in items or []:
+            if not item or item in seen:
+                continue
+            seen.add(item)
+            out.append(item)
+    return out
 
 
 def route_query(query: str) -> Dict[str, Optional[object]]:
     signals = extract_signals(query)
     force_rule = match_force_rule(signals.normalized)
+    consult_keyword_hits = _count_domain_keyword_hits(signals.normalized)
+    consult_category_candidates = _build_consult_category_candidates(signals)
+    need_consult_case_search = bool(
+        signals.actions or signals.payments or signals.weak_intents
+    )
 
     if force_rule:
         return RouterResult(
@@ -49,6 +94,9 @@ def route_query(query: str) -> Dict[str, Optional[object]]:
             document_sources=[],
             exclude_sources=["terms"],
             document_source_policy="C",
+            need_consult_case_search=need_consult_case_search,
+            consult_category_candidates=consult_category_candidates,
+            consult_keyword_hits=consult_keyword_hits,
         ).__dict__
 
     (
@@ -62,6 +110,8 @@ def route_query(query: str) -> Dict[str, Optional[object]]:
         exclude_sources,
         document_source_policy,
     ) = decide_route(signals)
+    if ui_route == ROUTE_CARD_USAGE:
+        need_consult_case_search = True
 
     return RouterResult(
         route=ui_route,
@@ -83,6 +133,9 @@ def route_query(query: str) -> Dict[str, Optional[object]]:
         document_sources=document_sources,
         exclude_sources=exclude_sources,
         document_source_policy=document_source_policy,
+        need_consult_case_search=need_consult_case_search,
+        consult_category_candidates=consult_category_candidates,
+        consult_keyword_hits=consult_keyword_hits,
     ).__dict__
 
 
