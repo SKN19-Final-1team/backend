@@ -8,7 +8,7 @@ from app.llm.base import get_openai_client
 
 DEFAULT_MODEL = "gpt-4.1-mini"
 MAX_DOCS = 2
-MAX_SNIPPET_CHARS = 900
+MAX_SNIPPET_CHARS = 520
 
 
 def _truncate(text: str, limit: int) -> str:
@@ -19,23 +19,40 @@ def _truncate(text: str, limit: int) -> str:
     return text[:limit].rstrip() + "..."
 
 
-def _build_prompt(query: str, consult_docs: List[Dict[str, Any]]) -> str:
-    parts: List[str] = []
-    for idx, doc in enumerate(consult_docs[:MAX_DOCS], 1):
-        title = doc.get("title") or ""
-        category = (doc.get("metadata") or {}).get("category") or ""
+def _build_doc_snippets(docs: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+    out: List[Dict[str, str]] = []
+    for doc in docs[:MAX_DOCS]:
+        title = doc.get("title") or (doc.get("metadata") or {}).get("title") or ""
         content = _truncate(doc.get("content") or "", MAX_SNIPPET_CHARS)
-        parts.append(
-            f"[사례 {idx}]\n"
-            f"제목: {title}\n"
-            f"카테고리: {category}\n"
-            f"내용: {content}"
-        )
+        out.append({"title": title, "snippet": content})
+    return out
+
+
+def _build_prompt(query: str, doc_snippets: List[Dict[str, str]], consult_hints: Dict[str, List[str]]) -> str:
+    parts: List[str] = []
+    if doc_snippets:
+        docs_block = []
+        for idx, doc in enumerate(doc_snippets, 1):
+            docs_block.append(f"- ({idx}) {doc.get('title', '')}: {doc.get('snippet', '')}")
+        parts.append("[정책 근거]\n" + "\n".join(docs_block))
+    if consult_hints:
+        flow = consult_hints.get("flow_steps") or []
+        questions = consult_hints.get("common_questions") or []
+        if flow:
+            parts.append("[상담 흐름]\n" + "\n".join(f"- {item}" for item in flow))
+        if questions:
+            parts.append("[확인 질문]\n" + "\n".join(f"- {item}" for item in questions))
+
+    question_rule = ""
+    if consult_hints.get("common_questions"):
+        question_rule = "확인 질문을 1개 포함해. "
     return (
-        "다음 상담 사례를 참고해 상담사가 그대로 읽을 수 있는 안내 문구를 작성해줘. "
+        "다음 정보를 바탕으로 상담사가 그대로 읽을 수 있는 안내 문구를 작성해줘. "
         "대화 요약이 아니라 안내문이어야 하며, 역할 표기(상담사/고객/손님:)는 금지. "
-        "존댓말로 1~2문장, 140자 이내, 구체적 절차 요약 중심. "
-        "추측/불확실한 정보는 넣지 말고, 개인정보 요청은 하지 마.\n\n"
+        "존댓말로 2~4문장, 200자 이내, 구체적 절차 요약 중심. "
+        "정책 근거는 [정책 근거]만 사용하고, 말투/진행 순서는 [상담 흐름]을 참고해. "
+        + question_rule
+        + "추측/불확실한 정보는 넣지 말고, 개인정보 요청은 하지 마.\n\n"
         f"고객 질문: {query}\n\n"
         + "\n\n".join(parts)
         + "\n\n"
@@ -43,14 +60,16 @@ def _build_prompt(query: str, consult_docs: List[Dict[str, Any]]) -> str:
     )
 
 
-def generate_guidance_script_from_consult(
+def generate_guidance_script(
     query: str,
-    consult_docs: List[Dict[str, Any]],
+    docs: List[Dict[str, Any]],
+    consult_hints: Dict[str, List[str]],
     model: Optional[str] = None,
 ) -> str:
-    if not consult_docs:
+    if not docs and not consult_hints:
         return ""
-    prompt = _build_prompt(query, consult_docs)
+    doc_snippets = _build_doc_snippets(docs)
+    prompt = _build_prompt(query, doc_snippets, consult_hints)
     client = get_openai_client()
     try:
         resp = client.chat.completions.create(
@@ -80,7 +99,10 @@ def generate_guidance_script_from_consult(
     guidance_script = payload.get("guidanceScript")
     if not isinstance(guidance_script, str):
         return ""
-    return guidance_script.strip()
+    guidance_script = guidance_script.strip()
+    if any(token in guidance_script for token in ("상담사:", "손님:", "고객:", "고객님:")):
+        return ""
+    return guidance_script
 
 
-__all__ = ["generate_guidance_script_from_consult"]
+__all__ = ["generate_guidance_script"]

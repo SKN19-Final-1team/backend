@@ -27,7 +27,8 @@ from app.rag.pipeline.utils import (
     strict_guidance_script,
 )
 from app.rag.postprocess.guide_script import build_guide_script_message
-from app.llm.rag_llm.guidance_script_generator import generate_guidance_script_from_consult
+from app.rag.postprocess.consult_hints import build_consult_hints
+from app.llm.rag_llm.guidance_script_generator import generate_guidance_script
 from app.rag.postprocess.cards import omit_empty, promote_definition_doc, split_cards_by_query
 from app.rag.postprocess.keywords import collect_query_keywords, normalize_text
 from app.rag.postprocess.sections import clean_card_docs
@@ -133,8 +134,16 @@ async def run_rag(
                     retrieve_cache_status = "miss"
     if should_search_consult_cases(query, routing, session_state):
         consult_docs = await retrieve_consult_cases(query=query, routing=routing, top_k=cfg.top_k)
-        if consult_docs and os.getenv("RAG_GUIDANCE_FROM_CONSULT_LLM", "1") != "0":
-            consult_guidance_script = generate_guidance_script_from_consult(query, consult_docs, cfg.model)
+        if os.getenv("RAG_GUIDANCE_FROM_CONSULT_LLM", "1") != "0":
+            matched = routing.get("matched") or {}
+            intent_terms = matched.get("actions") or matched.get("weak_intents") or []
+            consult_hints = build_consult_hints(consult_docs, intent_terms=intent_terms)
+            consult_guidance_script = generate_guidance_script(
+                query=query,
+                docs=docs[:2],
+                consult_hints=consult_hints,
+                model=cfg.model,
+            )
 
     docs = clean_card_docs(docs, query)
     t_retrieve = time.perf_counter()
@@ -220,6 +229,26 @@ async def run_rag(
         "routing": routing,
         "meta": {"model": cfg.model, "doc_count": len(docs), "context_chars": 0},
     }
+    if os.getenv("RAG_GUIDANCE_DEBUG", "0") == "1":
+        response["debug"] = {
+            "used_policy_docs": [
+                {
+                    "id": str((doc.get("metadata") or {}).get("id") or doc.get("id") or ""),
+                    "title": doc.get("title") or (doc.get("metadata") or {}).get("title") or "",
+                    "source": doc.get("table") or (doc.get("metadata") or {}).get("source_table") or "",
+                }
+                for doc in docs[:2]
+            ],
+            "used_consult_docs": [
+                {
+                    "id": str(doc.get("id") or doc.get("db_id") or ""),
+                    "title": doc.get("title") or "",
+                    "score": float(doc.get("score") or 0.0),
+                }
+                for doc in consult_docs[:2]
+            ],
+            "consult_hints": consult_hints if "consult_hints" in locals() else {},
+        }
     if cfg.include_docs:
         response["docs"] = docs
         response["consult_docs"] = consult_docs
