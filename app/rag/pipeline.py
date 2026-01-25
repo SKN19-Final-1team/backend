@@ -25,7 +25,7 @@ from app.rag.retriever import retrieve_multi
 from app.rag.router import route_query
 
 # --- sLLM을 사용한 텍스트 교정 및 키워드 추출 ---
-# from app.llm.sllm_refiner import refine_text
+from app.llm.sllm_refiner import refine_text
 
 
 LOG_TIMING = os.getenv("RAG_LOG_TIMING", "1") != "0"
@@ -157,9 +157,9 @@ async def run_rag(query: str, config: Optional[RAGConfig] = None) -> Dict[str, A
     t_start = time.perf_counter()
     
     # --- sLLM을 사용한 텍스트 교정 및 키워드 추출 ---
-    # sllm_result = refine_text(query)
-    # query = sllm_result["text"]
-    # sllm_keywords = sllm_result["keywords"]
+    sllm_result = refine_text(query)
+    query = sllm_result["text"]
+    sllm_keywords = sllm_result["keywords"]
     # --------------------------------------------
     
     routing = route(query)
