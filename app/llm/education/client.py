@@ -2,6 +2,9 @@ import os
 import json
 import requests
 from typing import Optional, Dict, Any
+from dotenv import load_dotenv
+
+load_dotenv()
 
 RUNPOD_IP = os.getenv("RUNPOD_IP")
 RUNPOD_PORT = os.getenv("RUNPOD_PORT")

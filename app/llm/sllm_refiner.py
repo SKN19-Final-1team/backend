@@ -3,7 +3,10 @@ import json
 import re
 import requests
 from typing import Optional, Dict, List
+from dotenv import load_dotenv()
 from llama_cpp import Llama
+
+load_dotenv()
 
 _sllm_model: Optional[Llama] = None
 _model_loaded = False

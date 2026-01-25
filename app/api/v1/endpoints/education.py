@@ -11,6 +11,13 @@ import psycopg2.extras
 
 from app.llm.education.feature_analyzer import analyze_consultation, format_analysis_for_db
 from app.llm.education.persona_generator import create_system_prompt, create_scenario_script
+from app.llm.education.tts_speaker import (
+    initialize_conversation,
+    process_agent_input,
+    get_conversation_history,
+    end_conversation,
+    get_session_info
+)
 
 
 router = APIRouter()
@@ -34,6 +41,36 @@ class SimulationStartResponse(BaseModel):
     customer_name: str
     customer_profile: Dict[str, Any]
     scenario_script: Optional[Dict[str, Any]] = None
+
+
+class ConversationMessageRequest(BaseModel):
+    """대화 메시지 요청"""
+    message: str
+    mode: str = "text"  # "text" 또는 "voice"
+
+
+class ConversationMessageResponse(BaseModel):
+    """대화 메시지 응답"""
+    customer_response: str
+    turn_number: int
+    audio_url: Optional[str] = None
+
+
+class ConversationHistoryResponse(BaseModel):
+    """대화 히스토리 응답"""
+    session_id: str
+    customer_name: str
+    conversation_history: List[Dict[str, str]]
+    turn_count: int
+
+
+class ConversationEndResponse(BaseModel):
+    """대화 종료 응답"""
+    session_id: str
+    customer_name: str
+    turn_count: int
+    duration_seconds: float
+    conversation_history: List[Dict[str, str]]
 
 
 @router.get("/scenarios", response_model=ScenarioListResponse)
@@ -138,6 +175,9 @@ async def start_simulation(request: SimulationStartRequest):
             # 세션 ID 생성
             session_id = f"sim_{consultation['id']}_{random.randint(10000, 99999)}"
             
+            # 대화 세션 초기화
+            initialize_conversation(session_id, system_prompt, customer_profile)
+            
             return SimulationStartResponse(
                 session_id=session_id,
                 system_prompt=system_prompt,
@@ -154,26 +194,104 @@ async def start_simulation(request: SimulationStartRequest):
         conn.close()
 
 
+@router.post("/simulation/{session_id}/message", response_model=ConversationMessageResponse)
+async def send_message(session_id: str, request: ConversationMessageRequest):
+    """
+    대화 메시지 전송 및 AI 고객 응답 받기
+    
+    Args:
+        session_id: 세션 ID
+        request: 메시지 요청 (상담원 메시지)
+        
+    Returns:
+        AI 고객 응답
+    """
+    try:
+        response = process_agent_input(
+            session_id=session_id,
+            agent_message=request.message,
+            input_mode=request.mode
+        )
+        
+        return ConversationMessageResponse(**response)
+        
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"메시지 처리 실패: {str(e)}")
+
+
+@router.get("/simulation/{session_id}/history", response_model=ConversationHistoryResponse)
+async def get_history(session_id: str):
+    """
+    대화 히스토리 조회
+    
+    Args:
+        session_id: 세션 ID
+        
+    Returns:
+        대화 히스토리
+    """
+    try:
+        session_info = get_session_info(session_id)
+        
+        if not session_info:
+            raise HTTPException(status_code=404, detail=f"세션을 찾을 수 없습니다: {session_id}")
+        
+        return ConversationHistoryResponse(
+            session_id=session_info["session_id"],
+            customer_name=session_info["customer_name"],
+            conversation_history=session_info["conversation_history"],
+            turn_count=session_info["turn_count"]
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"히스토리 조회 실패: {str(e)}")
+
+
+@router.post("/simulation/{session_id}/end", response_model=ConversationEndResponse)
+async def end_simulation(session_id: str):
+    """
+    시뮬레이션 종료
+    
+    Args:
+        session_id: 세션 ID
+        
+    Returns:
+        대화 요약 정보
+    """
+    try:
+        summary = end_conversation(session_id)
+        
+        return ConversationEndResponse(**summary)
+        
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"세션 종료 실패: {str(e)}")
+
+
 @router.get("/simulation/{session_id}/status")
 async def get_simulation_status(session_id: str):
     """
-    시뮬레이션 상태 조회 (미구현)
+    시뮬레이션 상태 조회
     
-    향후 구현 예정:
-    - 진행 중인 시뮬레이션의 상태 조회
-    - 대화 히스토리 조회
+    Args:
+        session_id: 세션 ID
+        
+    Returns:
+        세션 상태 정보
     """
-    return {"session_id": session_id, "status": "not_implemented"}
-
-
-@router.post("/simulation/{session_id}/complete")
-async def complete_simulation(session_id: str):
-    """
-    시뮬레이션 완료 및 평가 (미구현)
+    session_info = get_session_info(session_id)
     
-    향후 구현 예정:
-    - 상담 내용 평가
-    - 피드백 생성
-    - 점수 산정
-    """
-    return {"session_id": session_id, "message": "평가 기능은 향후 구현 예정입니다."}
+    if not session_info:
+        raise HTTPException(status_code=404, detail=f"세션을 찾을 수 없습니다: {session_id}")
+    
+    return {
+        "session_id": session_info["session_id"],
+        "customer_name": session_info["customer_name"],
+        "turn_count": session_info["turn_count"],
+        "status": "active"
+    }
