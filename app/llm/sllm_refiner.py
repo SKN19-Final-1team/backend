@@ -3,16 +3,17 @@ import json
 import re
 import requests
 from typing import Optional, Dict, List
-from llama_cpp import Llama
+from dotenv import load_dotenv
+# from llama_cpp import Llama
 
-_sllm_model: Optional[Llama] = None
+# _sllm_model: Optional[Llama] = None
 _model_loaded = False
 _model_load_failed = False
 
 # RunPod API 설정
-RUNPOD_IP = "213.192.2.88"
-RUNPOD_PORT = "40070"
-RUNPOD_API_KEY = "0211"
+RUNPOD_IP = os.getenv("RUNPOD_IP")
+RUNPOD_PORT = os.getenv("RUNPOD_PORT")
+RUNPOD_API_KEY = os.getenv("RUNPOD_API_KEY")
 RUNPOD_MODEL_NAME = "kanana-nano-2.1b-instruct"
 
 RUNPOD_API_URL = f"http://{RUNPOD_IP}:{RUNPOD_PORT}/v1/chat/completions"
@@ -27,11 +28,6 @@ def refine_text(text: str) -> Dict[str, any]:
     # 텍스트가 비어있다면 원본 반환
     if not text or not text.strip():
         return {"text": text, "keywords": []}
-
-    # 1. 단어 사전 기반 교정 (Dictionary-based Normalization)
-    from app.rag.vocab.keyword_dict import normalize_sentence_with_dict
-    text = normalize_sentence_with_dict(text)
-    print(f"[sLLM] Dictionary normalized text: {text}")
 
     try:
         system_prompt = """금융 텍스트 교정. 발음 뭉개짐, 띄어쓰기 오류, 맞춤법 오류, 오타 수정. 아래 출력 형식 외 부연설명 절대 금지

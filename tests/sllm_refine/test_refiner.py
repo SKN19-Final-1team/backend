@@ -10,7 +10,7 @@ from pathlib import Path
 
 # 테스트 데이터 import
 sys.path.insert(0, str(Path(__file__).parent / "tests"))
-from test_data.noisy_utterances import get_test_dataset
+from tests.test_data.noisy_utterances import get_test_dataset
 
 from app.llm.sllm_refiner import refine_text
 from app.rag.pipeline import run_rag, RAGConfig
