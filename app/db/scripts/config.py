@@ -12,7 +12,6 @@ from typing import Literal
 # 환경 타입: 'dev' 또는 'prod'
 # dev: data-preprocessing_dev 사용
 # prod: data-preprocessing 사용
-# 기본값: 'prod' (팀 레포는 프로덕션 환경)
 ENV_TYPE: Literal['dev', 'prod'] = os.getenv('DB_SCRIPTS_ENV', 'prod').lower()
 
 # 프로젝트 루트 디렉토리
@@ -44,3 +43,7 @@ HANA_VECTORDB_FILE = HANA_DATA_DIR / "hana_vectordb_with_embeddings.json"
 # db/data/ 까지: parents[1] / "data"
 DB_DIR = Path(__file__).resolve().parents[1]  # backend/app/db
 EMPLOYEES_DATA_FILE = DB_DIR / "data" / "employeesData.json"
+CUSTOMERS_DATA_FILE = DB_DIR / "data" / "customersData.json"
+
+# 테디카드 카드 상품 데이터 경로 (398개 실제 카드 상품)
+CARD_PRODUCTS_FILE = PROJECT_ROOT / "data-preprocessing" / "data" / "teddycard" / "teddycard_card_products_with_embeddings.json"
