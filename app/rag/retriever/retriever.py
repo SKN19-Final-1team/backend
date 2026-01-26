@@ -27,6 +27,50 @@ MAX_DOCUMENT_SOURCES = min(int(os.getenv("RAG_MAX_DOCUMENT_SOURCES", "2")), 2)
 # 문서 소스 필터 패턴
 _TERM_SEP_RE = re.compile(r"[\s\-/·]+")
 _LOSS_INTENT_KEYS = {"분실", "도난", "분실도난", "도난분실", "잃어버"}
+_CARD_INFO_ENTITY_MAP = {
+    "다둥이": "서울시다둥이행복카드",
+    "국민행복": "국민행복카드",
+    "k패스": "K-패스",
+    "k-패스": "K-패스",
+    "k 패스": "K-패스",
+    "나라사랑": "나라사랑카드",
+    "으랏차차": "KT 으랏차차",
+}
+_PAYMENT_INTENT_KEYS = {
+    "결제",
+    "승인",
+    "오류",
+    "안돼",
+    "안됨",
+    "실패",
+    "삼성페이",
+    "티머니",
+    "등록",
+    "연동",
+    "카카오페이",
+    "애플페이",
+}
+_PAYMENT_BLOCK_TERMS = [
+    "k패스",
+    "k-패스",
+    "다둥이",
+    "혜택",
+    "연회비",
+    "발급",
+    "추천",
+    "전월",
+    "실적",
+]
+_PAYMENT_BLOCK_PATTERNS = [
+    "%k패스%",
+    "%K-패스%",
+    "%다둥이%",
+    "%혜택%",
+    "%연회비%",
+    "%발급%",
+    "%추천%",
+    "%전월실적%",
+]
 
 
 def _normalize_match_key(value: str) -> str:
@@ -36,6 +80,36 @@ def _normalize_match_key(value: str) -> str:
 def _should_strict_guide_filter(terms: List[str]) -> bool:
     normalized = {_normalize_match_key(term) for term in terms if term}
     return bool(normalized & _LOSS_INTENT_KEYS)
+
+
+def _has_any_keyword(text: str, keywords: List[str] | set[str]) -> bool:
+    if not text:
+        return False
+    lower = text.lower()
+    compact = _normalize_match_key(lower)
+    for key in keywords:
+        if not key:
+            continue
+        key_lower = key.lower()
+        if key_lower in lower:
+            return True
+        key_compact = _normalize_match_key(key_lower)
+        if key_compact and key_compact in compact:
+            return True
+    return False
+
+
+def _row_has_blocked_term(row: tuple[object, str, Dict[str, object], float], blocked: List[str]) -> bool:
+    _, content, metadata, _ = row
+    meta = metadata if isinstance(metadata, dict) else {}
+    title = str(meta.get("title") or meta.get("name") or meta.get("card_name") or "")
+    text = f"{title} {content or ''}"
+    return _has_any_keyword(text, blocked)
+
+
+def _should_block_payment_noise(terms: List[str]) -> bool:
+    normalized = {_normalize_match_key(term) for term in terms if term}
+    return bool(normalized & _PAYMENT_INTENT_KEYS)
 
 
 def _row_has_any_term(
@@ -85,11 +159,21 @@ async def retrieve_docs(
     routing: Dict[str, object],
     top_k: int = 5,
     table: Optional[str] = None,
-    allow_fallback: bool = True,
 ) -> List[Dict[str, object]]:
     filters = routing.get("filters") or routing.get("boost") or {}
     route_name = routing.get("route") or routing.get("ui_route")
     db_route = routing.get("db_route")
+    if route_name == "card_info":
+        # 엔티티 하드 필터: 매칭 실패 시 후보 제거
+        if not _as_list(filters.get("card_name")):
+            lowered = query.lower()
+            for key, canonical in _CARD_INFO_ENTITY_MAP.items():
+                if key in lowered:
+                    filters["card_name"] = [canonical]
+                    break
+        if _as_list(filters.get("card_name")):
+            filters["require_card_name_match"] = True
+        routing["filters"] = filters
     # APPLEPAY: 애플페이 intent 감지 시 guide 문서만 검색
     applepay_intent = routing.get("applepay_intent")
     if applepay_intent:
@@ -122,6 +206,9 @@ async def retrieve_multi(
     context = _build_search_context(query, routing)
     route_name = routing.get("route") or routing.get("ui_route")
     fetch_k = _fetch_k(top_k)
+    retrieval_mode = routing.get("retrieval_mode") or "keyword_only"
+    use_vector = USE_VECTOR and retrieval_mode != "keyword_only"
+    use_keyword = USE_KEYWORD
     if route_name == "card_info":
         fetch_k = max(fetch_k, 20)
     candidates: List[tuple[float, int, Dict[str, object]]] = []
@@ -156,22 +243,25 @@ async def retrieve_multi(
         # 소스 필터 추가
         if source_filter:
             search_filters["_scope_filter"] = source_filter
+
+        if route_name == "card_info" and _is_card_table(safe_table) and context.card_values:
+            search_filters["require_card_name_match"] = True
         
         # 애플페이 필터
         if applepay_intent and safe_table == "service_guide_documents":
             search_filters["id_prefix"] = "hyundai_applepay"
-        
+
         # 카드 테이블 + 카테고리 필터 → 먼저 카테고리로 검색
         if _is_card_table(safe_table) and context.category_terms:
             cat_filters = dict(search_filters)
             cat_filters["category"] = context.category_terms
-            if USE_VECTOR:
+            if use_vector:
                 rows = vector_search(context.query_text, table=safe_table, limit=fetch_k, filters=cat_filters)
             else:
                 rows = []
-            if not rows and USE_KEYWORD:
+            if not rows and use_keyword:
                 rows = text_search(table=safe_table, terms=context.query_terms, limit=fetch_k, filters=cat_filters)
-            if not rows and USE_VECTOR:
+            if not rows and use_vector:
                 rows = vector_search(context.query_text, table=safe_table, limit=fetch_k, filters=search_filters)
             return _finish(rows)
         
@@ -185,9 +275,9 @@ async def retrieve_multi(
                 guide_terms = _filter_guide_query_terms(context.query_terms)
             
             rows = []
-            if USE_KEYWORD:
+            if use_keyword:
                 rows = text_search(table=safe_table, terms=guide_terms or context.query_terms, limit=fetch_k, filters=search_filters)
-            elif USE_VECTOR:
+            elif use_vector:
                 rows = vector_search(context.query_text, table=safe_table, limit=fetch_k, filters=search_filters)
             
             # Loss/theft 쿼리 엄격한 필터
@@ -206,29 +296,30 @@ async def retrieve_multi(
         
         # 기본 검색
         if _is_card_table(safe_table):
-            rows = vector_search(context.query_text, table=safe_table, limit=fetch_k, filters=search_filters)
+            rows = vector_search(context.query_text, table=safe_table, limit=fetch_k, filters=search_filters) if use_vector else []
         else:
             rows = []
-            if USE_KEYWORD:
+            if use_keyword:
                 rows = text_search(table=safe_table, terms=context.query_terms, limit=fetch_k, filters=search_filters)
-            if not rows and USE_VECTOR:
+            if not rows and use_vector:
                 rows = vector_search(context.query_text, table=safe_table, limit=fetch_k, filters=search_filters)
         
-        if (ENABLE_PRIORITY_TERMS and USE_KEYWORD and _is_card_table(safe_table) 
+        if (ENABLE_PRIORITY_TERMS and use_keyword and _is_card_table(safe_table) 
             and context.category_terms and context.search_mode in {"ISSUE", "BENEFIT"}):
             priority_terms = _priority_terms(context.category_terms)
             if priority_terms:
                 extra = text_search(table=safe_table, terms=priority_terms, limit=fetch_k, filters=search_filters)
                 rows.extend(extra)
         
-        if (USE_VECTOR and _is_card_table(safe_table) and context.card_terms 
+        if (use_vector and _is_card_table(safe_table) and context.card_terms 
             and not context.intent_terms and not context.payment_terms and not context.category_terms):
             loose = dict(search_filters)
             loose.pop("card_name", None)
-            extra = vector_search(context.query_text, table=safe_table, limit=fetch_k, filters=loose)
-            if extra:
-                rows.extend(extra)
-        
+            if not search_filters.get("require_card_name_match"):
+                extra = vector_search(context.query_text, table=safe_table, limit=fetch_k, filters=loose)
+                if extra:
+                    rows.extend(extra)
+
         return _finish(rows)
 
     for table in tables:
@@ -283,7 +374,11 @@ async def retrieve_multi(
     # 결과 구성: card_info는 카드/가이드 최소 1개씩 포함하도록 구성
     card_docs = [d for d in candidates if d[2].get("table") == "card_products"]
     guide_docs = [d for d in candidates if d[2].get("table") == "service_guide_documents"]
+    lane_allow_mixed = bool(routing.get("lane_allow_mixed"))
     if route_name == "card_info":
+        if not lane_allow_mixed:
+            docs = _finalize_candidates(card_docs[:top_k], _doc_key, context)
+            return docs[:top_k]
         ordered: List[Tuple[float, int, Dict[str, object]]] = []
         if card_docs:
             ordered.extend(card_docs[:max(1, top_k - 1)])
@@ -294,6 +389,9 @@ async def retrieve_multi(
             ordered.extend(rest[: max(0, top_k - len(ordered))])
         docs = _finalize_candidates(ordered, _doc_key, context)
     else:
+        if not lane_allow_mixed:
+            docs = _finalize_candidates(guide_docs[:top_k], _doc_key, context)
+            return docs[:top_k]
         diverse_docs = []
         if card_docs:
             diverse_docs.append(card_docs[0])

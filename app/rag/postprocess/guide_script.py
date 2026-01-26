@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List
 
 
@@ -15,6 +16,12 @@ def _first_sentence(text: str) -> str:
 
 def _clean_line(text: str, limit: int = 120) -> str:
     text = (text or "").strip()
+    # 전화번호/고객센터 등 불필요한 숫자 노출 제거
+    phone_dash = r"[\-–—‑]"
+    text = re.sub(rf"\b\d{{2,4}}{phone_dash}\d{{3,4}}{phone_dash}\d{{4}}\b", "", text)
+    text = re.sub(r"\b\d{8,11}\b", "", text)
+    text = re.sub(r"(고객센터|콜센터|문의|연락처)[^\n]*", "", text)
+    text = text.replace("테디카드", "").replace("신용정보 알림서비스", "").strip()
     if len(text) <= limit:
         return text
     return text[:limit].rstrip() + "…"

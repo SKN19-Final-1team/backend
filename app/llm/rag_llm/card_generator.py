@@ -38,6 +38,10 @@ def doc_summary_cache_get(key):
 def doc_summary_cache_set(key, summary):
     return None
 
+
+def _normalize_ws(text: str) -> str:
+    return re.sub(r"\s+", " ", text or "").strip()
+
 _TERM_RE = re.compile(r"[A-Za-z0-9가-힣]+")
 _SECTION_CUT_PATTERNS = [
     re.compile(r"^#\\s*금융소비자\\s*보호제도\\s*안내", re.I),
@@ -160,9 +164,23 @@ def _build_rule_summary(query: str, content: str) -> str:
     # 불릿/인사/문의/전화 패턴 제거
     summary = re.sub(r"^[\-•·\*\d\s]+", "", summary, flags=re.MULTILINE)
     summary = re.sub(r"(문의|연락처|전화|고객센터|콜센터)[^\n]*", "", summary)
+    summary = re.sub(r"\b\d{2,4}-\d{3,4}-\d{4}\b", "", summary)
+    summary = summary.replace("테디카드", "")
+    summary = summary.replace("신용정보 알림서비스", "")
     summary = re.sub(r"(^|\n)[가-힣]{2,5}님[\s,]*", "", summary)
     summary = summary.strip()
     return summary[:160]
+
+
+def _sanitize_card_content(text: str) -> str:
+    if not text:
+        return ""
+    phone_dash = r"[\-–—‑]"
+    cleaned = re.sub(rf"\b\d{{2,4}}{phone_dash}\d{{3,4}}{phone_dash}\d{{4}}\b", "", text)
+    cleaned = re.sub(r"\b\d{8,11}\b", "", cleaned)
+    cleaned = re.sub(r"(테디카드 고객센터|테디카드)", "", cleaned)
+    cleaned = cleaned.replace("신용정보 알림서비스", "")
+    return _normalize_ws(cleaned)
 
 
 def build_rule_cards(query: str, docs: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], str]:
@@ -401,6 +419,7 @@ def generate_detail_cards(
         merged["title"] = base["title"]
         merged["detailContent"] = base["detailContent"]
         merged["relevanceScore"] = base["relevanceScore"]
+        merged["content"] = _sanitize_card_content(str(merged.get("content") or ""))
         out[card_index] = merged
         summary = str(merged.get("content") or "")
         table = str(docs[card_index].get("table") or (docs[card_index].get("metadata") or {}).get("source_table") or "")

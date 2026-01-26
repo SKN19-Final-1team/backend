@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+from pathlib import Path
+import json
 
 
 _ROLE_PREFIXES = ("상담사:", "손님:", "고객:", "고객님:")
@@ -24,67 +26,80 @@ def _is_low_signal(line: str) -> bool:
     return len(line) < 6
 
 
-_FALLBACK_INTENT_HINTS = {
-    "분실": (
-        ["분실 카드 확인", "분실 장소/일시 확인", "카드 정지 및 재발급 안내"],
-        ["분실하신 카드 종류를 확인해도 될까요?", "분실 장소와 날짜를 확인해도 될까요?"],
-    ),
-    "도난": (
-        ["도난 카드 확인", "도난 장소/일시 확인", "카드 정지 및 재발급 안내"],
-        ["도난 카드 종류를 확인해도 될까요?", "도난 장소와 날짜를 확인해도 될까요?"],
-    ),
-    "재발급": (
-        ["카드 재발급 대상 확인", "재발급 신청 진행", "배송/수령 안내"],
-        ["재발급할 카드 종류를 확인해도 될까요?", "수령 주소를 확인해도 될까요?"],
-    ),
-    "승인": (
-        ["결제 승인 내역 확인", "이용 본인 여부 확인", "필요 시 차단/정지 안내"],
-        ["해당 승인 건이 본인 이용인지 확인해도 될까요?"],
-    ),
-    "취소": (
-        ["결제 취소 요청 확인", "취소 처리 경로 안내", "환불 일정 안내"],
-        ["취소 요청하신 결제 건을 확인해도 될까요?"],
-    ),
-    "수수료": (
-        ["수수료 발생 사유 확인", "적용 기준 안내", "추가 문의 경로 안내"],
-        ["확인하실 수수료 유형을 알려주실 수 있을까요?"],
-    ),
-    "한도": (
-        ["현재 한도 확인", "한도 변경 가능 여부 안내", "필요 서류/절차 안내"],
-        ["확인하실 한도 종류(일/월)를 알려주실 수 있을까요?"],
-    ),
-    "현금서비스": (
-        ["현금서비스 이용 가능 여부 확인", "이용 절차 안내", "수수료/이자 안내"],
-        ["현금서비스 이용 금액을 알려주실 수 있을까요?"],
-    ),
-    "분실도난": (
-        ["분실/도난 카드 확인", "분실/도난 장소·일시 확인", "카드 정지 및 재발급 안내"],
-        ["분실하신 카드 종류를 확인해도 될까요?", "분실 장소와 날짜를 확인해도 될까요?"],
-    ),
-    "도난/분실": (
-        ["분실/도난 카드 확인", "분실/도난 장소·일시 확인", "카드 정지 및 재발급 안내"],
-        ["분실하신 카드 종류를 확인해도 될까요?", "분실 장소와 날짜를 확인해도 될까요?"],
-    ),
-}
+_CARD_QUESTION_TOKENS = ("어떤 카드", "카드 종류", "카드명", "카드 이름", "재발급할 카드")
 
 
-def _fallback_from_intents(intents: List[str], max_steps: int, max_qs: int) -> Dict[str, List[str]]:
-    flow_steps: List[str] = []
-    questions: List[str] = []
+def _filter_questions(questions: List[str], filled_slots: Dict[str, List[str]]) -> List[str]:
+    if not questions:
+        return []
+    card_names = filled_slots.get("card_name") or []
+    if card_names:
+        return [q for q in questions if not any(token in q for token in _CARD_QUESTION_TOKENS)]
+    return questions
+
+
+_RULES_PATH = Path(__file__).with_name("consult_hint_rules.json")
+
+
+def _load_rules() -> Dict[str, Any]:
+    try:
+        raw = _RULES_PATH.read_text(encoding="utf-8")
+        data = json.loads(raw)
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+    return {"scenario_tags": {}, "intent_keywords": {}, "fallback": {"flow_steps": [], "common_questions": []}}
+
+
+def _merge_hints(
+    base: Dict[str, List[str]],
+    add_steps: List[str],
+    add_questions: List[str],
+    max_steps: int,
+    max_qs: int,
+) -> Dict[str, List[str]]:
+    flow_steps = list(base.get("flow_steps") or [])
+    questions = list(base.get("common_questions") or [])
+    for step in add_steps:
+        if step and step not in flow_steps and len(flow_steps) < max_steps:
+            flow_steps.append(step)
+    for q in add_questions:
+        if q and q not in questions and len(questions) < max_qs:
+            questions.append(q)
+    return {"flow_steps": flow_steps, "common_questions": questions}
+
+
+def _lookup_intent_rules(intents: List[str], rules: Dict[str, Any], max_steps: int, max_qs: int) -> Dict[str, List[str]]:
+    intent_rules = rules.get("intent_keywords") or {}
+    hints: Dict[str, List[str]] = {"flow_steps": [], "common_questions": []}
     for intent in intents:
-        for key, (steps, qs) in _FALLBACK_INTENT_HINTS.items():
+        for key, payload in intent_rules.items():
             if key in intent:
-                flow_steps.extend(steps)
-                questions.extend(qs)
-    return {
-        "flow_steps": flow_steps[:max_steps],
-        "common_questions": questions[:max_qs],
-    }
+                steps = payload.get("flow_steps") or []
+                questions = payload.get("common_questions") or []
+                hints = _merge_hints(hints, steps, questions, max_steps, max_qs)
+    return hints
+
+
+def _lookup_tag_rules(tags: List[str], rules: Dict[str, Any], max_steps: int, max_qs: int) -> Dict[str, List[str]]:
+    tag_rules = rules.get("scenario_tags") or {}
+    hints: Dict[str, List[str]] = {"flow_steps": [], "common_questions": []}
+    for tag in tags:
+        payload = tag_rules.get(tag)
+        if not isinstance(payload, dict):
+            continue
+        steps = payload.get("flow_steps") or []
+        questions = payload.get("common_questions") or []
+        hints = _merge_hints(hints, steps, questions, max_steps, max_qs)
+    return hints
 
 
 def build_consult_hints(
     consult_docs: List[Dict[str, Any]],
     intent_terms: Optional[List[str]] = None,
+    scenario_tags: Optional[List[str]] = None,
+    filled_slots: Optional[Dict[str, List[str]]] = None,
     max_steps: int = 3,
     max_qs: int = 2,
 ) -> Dict[str, List[str]]:
@@ -108,10 +123,32 @@ def build_consult_hints(
         if len(flow_steps) >= max_steps and len(questions) >= max_qs:
             break
 
-    hints = {"flow_steps": flow_steps, "common_questions": questions}
-    if (not flow_steps and not questions) and intent_terms:
-        return _fallback_from_intents(intent_terms, max_steps, max_qs)
-    return hints
+    rules = _load_rules()
+    merged = {"flow_steps": [], "common_questions": []}
+    if scenario_tags:
+        merged = _lookup_tag_rules(scenario_tags, rules, max_steps, max_qs)
+    if intent_terms:
+        intent_hints = _lookup_intent_rules(intent_terms, rules, max_steps, max_qs)
+        merged = _merge_hints(
+            merged,
+            intent_hints.get("flow_steps") or [],
+            intent_hints.get("common_questions") or [],
+            max_steps,
+            max_qs,
+        )
+    merged = _merge_hints(merged, flow_steps, questions, max_steps, max_qs)
+    if filled_slots:
+        merged["common_questions"] = _filter_questions(
+            merged.get("common_questions") or [],
+            filled_slots,
+        )[:max_qs]
+    if merged.get("flow_steps") or merged.get("common_questions"):
+        return merged
+    fallback = rules.get("fallback") or {}
+    return {
+        "flow_steps": list(fallback.get("flow_steps") or [])[:max_steps],
+        "common_questions": list(fallback.get("common_questions") or [])[:max_qs],
+    }
 
 
 __all__ = ["build_consult_hints"]
