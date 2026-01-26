@@ -15,6 +15,7 @@ build/
 cache/
 !app/rag/cache/
 !app/rag/cache/**
+app/rag/cache/__pycache__/
 
 # Environment variables
 *.env
