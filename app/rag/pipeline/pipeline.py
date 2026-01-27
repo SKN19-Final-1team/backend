@@ -18,7 +18,7 @@ from app.rag.cache.retrieval_cache import (
     retrieval_cache_get,
     retrieval_cache_set,
 )
-from app.rag.pipeline.retrieve import retrieve_consult_cases, retrieve_docs
+from app.rag.pipeline.retrieve import retrieve_consult_cases, retrieve_docs, retrieve_docs_card_info
 from app.rag.pipeline.utils import (
     apply_session_context,
     build_retrieve_cache_entries,
@@ -43,10 +43,10 @@ from app.rag.guidance import (
 )
 from app.rag.postprocess.sections import clean_card_docs
 from app.rag.router.router import route_query
-from app.rag.policy.policy_pins import POLICY_PINS
 from app.llm.rag_llm.card_generator import build_rule_cards
 from app.rag.policy.search_gating import decide_search_gating
 from app.rag.policy.answer_class import classify as classify_answer_class
+from app.rag.retriever.db import fetch_docs_by_ids
 
 # --- sLLM을 사용한 텍스트 교정 및 키워드 추출 ---
 # NOTE: sLLM 적용은 잠시 비활성화(주석 처리) 상태.
@@ -54,6 +54,10 @@ from app.rag.policy.answer_class import classify as classify_answer_class
 
 
 LOG_TIMING = os.getenv("RAG_LOG_TIMING", "1") != "0"
+LOG_RETRIEVER_DEBUG = os.getenv("RAG_LOG_RETRIEVER_DEBUG") == "1"
+RETRIEVE_BUDGET_MS = int(os.getenv("RAG_RETRIEVE_BUDGET_MS", "950"))
+RETRIEVE_MAX_STAGES = int(os.getenv("RAG_RETRIEVE_MAX_STAGES", "2"))
+
 
 
 @dataclass(frozen=True)
@@ -70,11 +74,6 @@ class RAGConfig:
 
 def route(query: str) -> Dict[str, Any]:
     return route_query(query)
-
-
-def _ensure_query_terms_in_cards(cards: List[Dict[str, Any]], query: str) -> List[Dict[str, Any]]:
-    if not cards:
-        return cards
 
 
 def _retrieval_failed(docs: List[Dict[str, Any]], routing: Dict[str, Any]) -> bool:
@@ -103,23 +102,6 @@ def _flip_route_for_fallback(routing: Dict[str, Any]) -> Dict[str, Any]:
     flipped["_lane_fallback_used"] = True
     flipped["route_fallback_from"] = route_name
     return flipped
-    q = query or ""
-    required_terms = []
-    for term in ("혜택", "한도", "전월", "실적", "전화", "번호", "애플페이"):
-        if term in q:
-            required_terms.append(term)
-    if "전월" in q and "실적" not in required_terms:
-        required_terms.append("실적")
-    if not required_terms:
-        return cards
-    combined = " ".join(str(c.get("content") or "") for c in cards)
-    missing = [t for t in required_terms if t not in combined]
-    if not missing:
-        return cards
-    first = dict(cards[0])
-    suffix = " ".join(missing)
-    first["content"] = (first.get("content") or "") + f" {suffix}"
-    return [first, *cards[1:]]
 
 
 def _sanitize_guidance_script(text: str, query: str) -> str:
@@ -156,10 +138,6 @@ def _sanitize_guidance_script(text: str, query: str) -> str:
     return cleaned.strip()
 
 
-def _compile_guidance_script(text: str, routing: Dict[str, Any], query: str) -> str:
-    return text
-
-
 def _strip_phone_in_cards(cards: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     if not cards:
         return cards
@@ -175,10 +153,6 @@ def _strip_phone_in_cards(cards: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         out.append(updated)
     return out
 
-
-
-
-PIN_IDS = {doc_id for pin in POLICY_PINS for doc_id in pin.get("doc_ids", [])}
 
 
 async def run_rag(
@@ -206,13 +180,8 @@ async def run_rag(
         routing["route"] = "card_usage"
         routing["db_route"] = "guide_tbl"
         routing["ui_route"] = "card_usage"
-    if any(k in query for k in ("전화", "번호", "고객센터", "연락처")) and (
-        routing.get("route") or routing.get("ui_route")
-    ) == "card_info":
-        routing["route"] = "card_usage"
-        filters = routing.get("filters") or {}
-        filters["phone_lookup"] = True
-        routing["filters"] = filters
+        if (routing.get("route") or routing.get("ui_route")) == "card_info":
+            routing["route"] = "card_usage"
     t_route = time.perf_counter()
     if "lane_allow_mixed" not in routing:
         routing["lane_allow_mixed"] = False
@@ -271,20 +240,47 @@ async def run_rag(
     consult_guidance_script = ""
     consult_hints: Optional[Dict[str, List[str]]] = None
     if retrieve_cache_status not in ("hit(mem)", "hit(redis)"):
-        docs = await retrieve_docs(query=query, routing=routing, top_k=cfg.top_k)
-        if _retrieval_failed(docs, routing) and routing.get("retrieval_mode") != "hybrid":
-            routing = dict(routing)
-            routing["retrieval_mode"] = "hybrid"
-            docs = await retrieve_docs(query=query, routing=routing, top_k=cfg.top_k)
-        if (
-            not docs
-            and routing.get("domain_score", 0) >= 3
-            and not routing.get("_lane_fallback_used")
-        ):
-            flipped = _flip_route_for_fallback(routing)
-            docs = await retrieve_docs(query=query, routing=flipped, top_k=cfg.top_k)
-            if docs:
-                routing = flipped
+        allow_fallback = (routing.get("route") or routing.get("ui_route")) != "card_info"
+        retrieve_stage = 0
+        retrieve_start = time.perf_counter()
+        route_name = routing.get("route") or routing.get("ui_route")
+        top_k = cfg.top_k
+        if route_name == "card_usage":
+            top_k = min(top_k, 2)
+        if route_name == "card_info":
+            docs = await retrieve_docs_card_info(
+                query=query,
+                routing=routing,
+                top_k=top_k,
+                log_scores=LOG_RETRIEVER_DEBUG,
+                budget_ms=RETRIEVE_BUDGET_MS,
+                start_ts=retrieve_start,
+            )
+            retrieve_stage = 2
+        else:
+            docs = await retrieve_docs(query=query, routing=routing, top_k=top_k)
+            retrieve_stage = 1
+        elapsed_ms = (time.perf_counter() - retrieve_start) * 1000
+        budget_exceeded = elapsed_ms >= RETRIEVE_BUDGET_MS
+        stage_exceeded = retrieve_stage >= RETRIEVE_MAX_STAGES
+        if allow_fallback:
+            if (not budget_exceeded) and (not stage_exceeded) and _retrieval_failed(docs, routing) and routing.get("retrieval_mode") != "hybrid":
+                routing = dict(routing)
+                routing["retrieval_mode"] = "hybrid"
+                docs = await retrieve_docs(query=query, routing=routing, top_k=top_k)
+                retrieve_stage += 1
+            elif (
+                (not budget_exceeded)
+                and (not stage_exceeded)
+                and not docs
+                and routing.get("domain_score", 0) >= 3
+                and not routing.get("_lane_fallback_used")
+            ):
+                flipped = _flip_route_for_fallback(routing)
+                docs = await retrieve_docs(query=query, routing=flipped, top_k=top_k)
+                if docs:
+                    routing = flipped
+                retrieve_stage += 1
         if RETRIEVE_CACHE_ENABLED and cache_key:
             entries = build_retrieve_cache_entries(docs)
             if entries:
@@ -296,6 +292,18 @@ async def run_rag(
 
     docs = clean_card_docs(docs, query)
     t_retrieve = time.perf_counter()
+    route_name = routing.get("route") or routing.get("ui_route")
+    if route_name == "card_usage":
+        llm_card_top_n = 1
+        if docs:
+            def _pin_sort_key(doc: Dict[str, Any]) -> tuple[int, int, float]:
+                pinned = 1 if doc.get("_pinned") else 0
+                pin_rank = doc.get("_pin_rank")
+                pin_rank_key = -pin_rank if isinstance(pin_rank, int) else -10**9
+                score = float(doc.get("score") or 0)
+                return (pinned, pin_rank_key, score)
+            docs = sorted(docs, key=_pin_sort_key, reverse=True)
+            docs = docs[:1]
     if routing.get("route") == "card_info":
         docs = promote_definition_doc(docs)
         llm_card_top_n = max(llm_card_top_n, 3)
@@ -363,15 +371,12 @@ async def run_rag(
     if cfg.strict_guidance_script and not consult_guidance_script:
         guidance_script = strict_guidance_script(guidance_script, docs)
     query_keywords = collect_query_keywords(query, routing, cfg.normalize_keywords)
-    route_name = routing.get("route") or routing.get("ui_route")
     if not cards:
         cards = []
         guidance_script = guidance_script or ""
     for card in cards:
         card["keywords"] = query_keywords
     cards = [omit_empty(card) for card in cards]
-    if route_name == "card_info":
-        cards = _ensure_query_terms_in_cards(cards, query)
     if (routing.get("filters") or {}).get("phone_lookup") is not True:
         cards = _strip_phone_in_cards(cards)
     if cards is None:
@@ -478,7 +483,6 @@ async def run_rag(
                 guidance_script = "신한카드 고객센터는 1544-7000입니다."
             else:
                 guidance_script = "고객센터 전화번호를 안내해 드리겠습니다."
-    guidance_script = _compile_guidance_script(guidance_script, routing, query)
     guidance_script = _sanitize_guidance_script(guidance_script, query)
     if "재발급" in query and guidance_script:
         guidance_script = _sanitize_guidance_script(guidance_script, query)
