@@ -502,11 +502,12 @@ async def run_rag(
         if guidance_script and all(k not in guidance_script for k in ("전화", "번호", "전화번호")):
             guidance_script = guidance_script.strip() + " 카드대출 전화번호 안내를 도와드릴게요."
     guidance_script = apply_guidance_rules(guidance_script, query, routing)
+    final_guidance = guide_script_message or guidance_script or ""
     response = {
         "currentSituation": current_cards,
         "nextStep": next_cards,
-        "guidanceScript": guidance_script or "",
-        "guide_script": {"message": guide_script_message},
+        "guidanceScript": final_guidance,
+        "guide_script": {"message": final_guidance},
         "routing": routing,
         "meta": {"model": cfg.model, "doc_count": len(docs), "context_chars": 0},
     }
