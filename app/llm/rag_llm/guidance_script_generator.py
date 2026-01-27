@@ -4,9 +4,8 @@ from typing import Any, Dict, List, Optional
 
 import json
 
-from app.llm.base import get_openai_client
+from app.llm.rag_llm.guide_client import generate_guide_text
 
-DEFAULT_MODEL = "gpt-4.1-mini"
 MAX_DOCS = 2
 MAX_SNIPPET_CHARS = 520
 _POLICY_EXCLUDE_TOKENS = ("무기명", "책임지지", "면책", "약관")
@@ -81,30 +80,23 @@ def generate_guidance_script(
     consult_hints: Dict[str, List[str]],
     model: Optional[str] = None,
 ) -> str:
+    _ = model
     if not docs and not consult_hints:
         return ""
     doc_snippets = _build_doc_snippets(docs)
     prompt = _build_prompt(query, doc_snippets, consult_hints)
-    client = get_openai_client()
+    system_prompt = "너는 카드 상담 가이드 문구 생성기다."
     try:
-        resp = client.chat.completions.create(
-            model=model or DEFAULT_MODEL,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "너는 카드 상담 가이드 문구 생성기다.",
-                },
-                {"role": "user", "content": prompt},
-            ],
+        raw = generate_guide_text(
+            prompt=prompt,
+            system_prompt=system_prompt,
             temperature=0.0,
             max_tokens=180,
-            response_format={"type": "json_object"},
+            json_output=True,
         )
     except Exception as exc:
         print("[guidance_script] LLM error:", repr(exc))
         return ""
-
-    raw = resp.choices[0].message.content or ""
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError:
