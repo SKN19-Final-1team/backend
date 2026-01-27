@@ -12,6 +12,7 @@ from pgvector import Vector
 from pgvector.psycopg2 import register_vector
 
 from app.llm.base import get_openai_client
+from app.rag.common.text_utils import unique_in_order
 from app.rag.common.doc_source_filters import ALLOWED_SCOPE_FILTERS, DOC_SOURCE_FILTERS
 from app.rag.retriever.terms import (
     _as_list,
@@ -20,7 +21,6 @@ from app.rag.retriever.terms import (
     _expand_guide_terms,
     _expand_payment_terms,
     _extract_query_terms,
-    _unique_in_order,
 )
 
 logger = logging.getLogger(__name__)
@@ -283,8 +283,40 @@ def build_where_clause(
     has_intent = bool(intent_terms) or bool(weak_terms)
 
     if _is_guide_table(table):
+        exclude_title_terms = _as_list(filters.get("exclude_title_terms"))
+        if exclude_title_terms:
+            term_clauses = []
+            for term in exclude_title_terms:
+                term_clauses.append(
+                    "(metadata->>'title' ILIKE %s OR content ILIKE %s)"
+                )
+                params.extend([f"%{term}%", f"%{term}%"])
+            if term_clauses:
+                clauses.append("NOT (" + " OR ".join(term_clauses) + ")")
+        exclude_like_any = _as_list(filters.get("exclude_like_any"))
+        if exclude_like_any:
+            clauses.append(
+                "NOT (content ILIKE ANY(%s) OR metadata->>'title' ILIKE ANY(%s) OR id ILIKE ANY(%s))"
+            )
+            params.extend([exclude_like_any, exclude_like_any, exclude_like_any])
+        if filters.get("phone_lookup"):
+            phone_terms = [
+                "전화",
+                "전화번호",
+                "고객센터",
+                "콜센터",
+                "ars",
+                "대표번호",
+                "연락처",
+                "문의",
+                "상담원",
+                "번호",
+            ]
+            phone_group = _build_like_group(phone_terms, params)
+            if phone_group:
+                clauses.append(phone_group)
 
-        guide_terms = _expand_guide_terms(_unique_in_order([*intent_values, *weak_values]))
+        guide_terms = _expand_guide_terms(unique_in_order([*intent_values, *weak_values]))
         guide_group = _build_like_group(guide_terms, params)
         if guide_group:
             clauses.append(guide_group)
@@ -384,7 +416,7 @@ def vector_search(
                 weak_values = _as_list(filters.get("weak_intent"))
                 intent_only = _is_guide_table(table) and (intent_values or weak_values) and not card_values
                 if intent_only:
-                    fallback_terms = _expand_guide_terms(_unique_in_order([*intent_values, *weak_values]))
+                    fallback_terms = _expand_guide_terms(unique_in_order([*intent_values, *weak_values]))
                     fallback_params: List[str] = []
                     fallback_group = _build_title_like_group(fallback_terms, fallback_params)
                     if fallback_group:
@@ -422,7 +454,7 @@ def text_search(
     use_trgm = _TRGM_ENABLED and not _is_card_table(table)
     if scope_filter and guide_with_terms_filter and str(scope_filter) == guide_with_terms_filter:
         use_trgm = False
-    terms = _unique_in_order([t for t in terms if t])
+    terms = unique_in_order([t for t in terms if t])
     trgm_terms = [t for t in terms if len(t) >= _TRGM_MIN_LEN] if use_trgm else []
     if use_trgm and _TRGM_MAX_TERMS > 0:
         trgm_terms = trgm_terms[:_TRGM_MAX_TERMS]
@@ -473,6 +505,7 @@ def text_search(
     if _is_card_table(table):
         actual_table = _resolve_table(table)
         card_values = _as_list(filters.get("card_name"))
+        require_card_name_match = bool(filters.get("require_card_name_match"))
         if card_values:
             # 1차: normalized card_name 인덱스 기반 후보 추출
             eq_any = [str(v).replace(' ', '').lower() for v in card_values]
@@ -484,9 +517,13 @@ def text_search(
                     sql = (
                         "SELECT id FROM " + actual_table +
                         " WHERE LOWER(REPLACE(metadata->>'card_name',' ','')) = ANY(%s) "
-                        "OR metadata->>'card_name' LIKE ANY(%s) LIMIT 20"
+                        "OR LOWER(REPLACE(COALESCE(name, ''),' ','')) = ANY(%s) "
+                        "OR metadata->>'card_name' LIKE ANY(%s) "
+                        "OR COALESCE(name, '') LIKE ANY(%s) "
+                        "OR COALESCE(metadata->>'title', '') LIKE ANY(%s) "
+                        "LIMIT 20"
                     )
-                    cur.execute(sql, [eq_any, prefix_any])
+                    cur.execute(sql, [eq_any, eq_any, prefix_any, prefix_any, prefix_any])
                     id_candidates = [row[0] for row in cur.fetchall()]
             if not id_candidates:
                 like_any = [f"%{str(v)}%" for v in card_values]
@@ -495,12 +532,19 @@ def text_search(
                     with conn.cursor() as cur:
                         sql = (
                             "SELECT id FROM " + actual_table +
-                            " WHERE (replace(metadata->>'card_name',' ','') ILIKE ANY(%s) OR metadata->>'card_name' ILIKE ANY(%s)) LIMIT 20"
+                            " WHERE (replace(metadata->>'card_name',' ','') ILIKE ANY(%s) "
+                            "OR replace(COALESCE(name, ''),' ','') ILIKE ANY(%s) "
+                            "OR metadata->>'card_name' ILIKE ANY(%s) "
+                            "OR COALESCE(name, '') ILIKE ANY(%s) "
+                            "OR COALESCE(metadata->>'title', '') ILIKE ANY(%s)) "
+                            "LIMIT 20"
                         )
-                        cur.execute(sql, [no_space_any, like_any])
+                        cur.execute(sql, [no_space_any, no_space_any, like_any, like_any, like_any])
                         id_candidates = [row[0] for row in cur.fetchall()]
             # 후보가 없으면 terms 기반 본문(content) 검색을 추가로 시도
             if not id_candidates:
+                if require_card_name_match:
+                    return []
                 if terms:
                     # terms 기반 본문 검색 (카드명 없이)
                     terms_clause = " OR ".join(["content ILIKE %s" for _ in terms])
@@ -579,6 +623,22 @@ def text_search(
             like_where = _and_conditions(like_where, scope_filter_sql)
         else:
             like_where = scope_filter_sql
+
+    exclude_like_any = _as_list(filters.get("exclude_like_any"))
+    if exclude_like_any:
+        exclude_sql = "NOT (content ILIKE ANY(%s) OR metadata->>'title' ILIKE ANY(%s) OR id ILIKE ANY(%s))"
+        if use_trgm and trgm_where:
+            trgm_where = _and_conditions(trgm_where, exclude_sql)
+            trgm_params.extend([exclude_like_any, exclude_like_any, exclude_like_any])
+        elif use_trgm and trgm_where == "":
+            trgm_where = exclude_sql
+            trgm_params.extend([exclude_like_any, exclude_like_any, exclude_like_any])
+        if like_where:
+            like_where = _and_conditions(like_where, exclude_sql)
+            like_params.extend([exclude_like_any, exclude_like_any, exclude_like_any])
+        else:
+            like_where = exclude_sql
+            like_params.extend([exclude_like_any, exclude_like_any, exclude_like_any])
     
     if not trgm_where and not like_where:
         return []

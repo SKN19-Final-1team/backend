@@ -9,6 +9,7 @@ from app.rag.retriever.config import (
     PRIORITY_TERMS_BY_CATEGORY,
     REISSUE_TERMS,
 )
+from app.rag.common.text_utils import unique_in_order
 from app.rag.vocab.keyword_dict import (
     ACTION_SYNONYMS,
     PAYMENT_SYNONYMS,
@@ -46,17 +47,6 @@ def _as_list(value: object | None) -> List[str]:
     if isinstance(value, str):
         return [value]
     return [item for item in value if item]
-
-
-def _unique_in_order(items: List[str]) -> List[str]:
-    seen = set()
-    out = []
-    for item in items:
-        if item in seen:
-            continue
-        seen.add(item)
-        out.append(item)
-    return out
 
 
 def _expand_no_space_terms(terms: List[str]) -> List[str]:
@@ -111,8 +101,8 @@ def _expand_payment_terms(terms: List[str]) -> List[str]:
     expanded = []
     for canonical in terms:
         expanded.extend(PAYMENT_SYNONYMS.get(canonical, []))
-    combined = _unique_in_order([*terms, *expanded])
-    return _unique_in_order([*combined, *_expand_no_space_terms(combined)])
+    combined = unique_in_order([*terms, *expanded])
+    return unique_in_order([*combined, *_expand_no_space_terms(combined)])
 
 
 def _expand_card_terms(terms: List[str]) -> List[str]:
@@ -120,14 +110,14 @@ def _expand_card_terms(terms: List[str]) -> List[str]:
     card_synonyms = get_card_name_synonyms()
     for canonical in terms:
         expanded.extend(card_synonyms.get(canonical, []))
-    return _unique_in_order([*terms, *expanded])
+    return unique_in_order([*terms, *expanded])
 
 
 def _expand_action_terms(terms: List[str]) -> List[str]:
     expanded = []
     for canonical in terms:
         expanded.extend(ACTION_SYNONYMS.get(canonical, []))
-    return _unique_in_order([*terms, *expanded])
+    return unique_in_order([*terms, *expanded])
 
 
 def _expand_guide_terms(terms: List[str]) -> List[str]:
@@ -145,9 +135,9 @@ def _expand_guide_terms(terms: List[str]) -> List[str]:
             for term in terms
             if _normalize_term_key(term) in safe_keys
         ]
-        expanded = _unique_in_order([*expanded, *safe_terms])
+        expanded = unique_in_order([*expanded, *safe_terms])
     else:
-        expanded = _unique_in_order(_expand_action_terms(terms))
+        expanded = unique_in_order(_expand_action_terms(terms))
 
     normalized: List[str] = []
     for term in expanded:
@@ -163,7 +153,7 @@ def _expand_guide_terms(terms: List[str]) -> List[str]:
         for v in _expand_loss_separator_variants(term):
             if v not in normalized:
                 normalized.append(v)
-    normalized = _unique_in_order(normalized)[:3]
+    normalized = unique_in_order(normalized)[:3]
     return _filter_generic_guide_terms(normalized)
 
 
@@ -171,7 +161,7 @@ def _expand_weak_terms(terms: List[str]) -> List[str]:
     expanded = []
     for canonical in terms:
         expanded.extend(WEAK_INTENT_SYNONYMS.get(canonical, []))
-    return _unique_in_order([*terms, *expanded])
+    return unique_in_order([*terms, *expanded])
 
 
 def _extract_category_terms(terms: List[str]) -> List[str]:
@@ -182,7 +172,7 @@ def _extract_category_terms(terms: List[str]) -> List[str]:
                 hits.append(hint)
     if "발급" in hits and "대상" in hits:
         hits.append("발급 대상")
-    return _unique_in_order(hits)
+    return unique_in_order(hits)
 
 
 def _build_query_text(query: str, query_template: str | None) -> str:
@@ -204,14 +194,14 @@ def _extract_query_terms(query: str) -> List[str]:
         if term in _STOPWORDS_LOWER:
             continue
         terms.append(term)
-    return _unique_in_order(terms)
+    return unique_in_order(terms)
 
 
 def _priority_terms(category_terms: List[str]) -> List[str]:
     terms: List[str] = []
     for term in category_terms:
         terms.extend(PRIORITY_TERMS_BY_CATEGORY.get(term, []))
-    return _unique_in_order(terms)
+    return unique_in_order(terms)
 
 
 def _select_search_mode(terms: List[str]) -> str:
@@ -258,7 +248,7 @@ def _build_search_context(query: str, routing: Dict[str, object]) -> SearchConte
     category_terms = _extract_category_terms([*query_terms, *weak_terms, *intent_terms])
     search_mode = _select_search_mode([*category_terms, *query_terms, *weak_terms, *intent_terms])
     wants_reissue = any(term in REISSUE_TERMS for term in [*query_terms, *intent_terms])
-    rank_terms = _unique_in_order([*intent_terms, *payment_terms, *weak_terms, *query_terms])
+    rank_terms = unique_in_order([*intent_terms, *payment_terms, *weak_terms, *query_terms])
     payment_only = bool(payment_terms) and not card_terms and not intent_terms
     payment_norm = {term.lower().replace(" ", "") for term in payment_terms}
     extra_terms = [

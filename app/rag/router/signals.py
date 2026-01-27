@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from flashtext import KeywordProcessor
 
+from app.rag.common.text_utils import unique_in_order
 from app.rag.vocab.keyword_dict import (
     ACTION_SYNONYMS,
     PAYMENT_SYNONYMS,
@@ -147,17 +148,6 @@ class Signals:
             or self.weak_intents
             or self.info_hint
         )
-
-
-def _unique_in_order(items: List[str]) -> List[str]:
-    seen = set()
-    out = []
-    for item in items:
-        if item in seen:
-            continue
-        seen.add(item)
-        out.append(item)
-    return out
 
 
 def _normalize_query(text: str) -> str:
@@ -341,7 +331,7 @@ def _fuzzy_match(
         canon = mapping.get(term)
         if canon:
             hits.append(canon)
-    return _unique_in_order(hits)
+    return unique_in_order(hits)
 
 
 def _card_token_match(query: str, synonyms: Dict[str, List[str]]) -> List[str]:
@@ -415,26 +405,26 @@ def _detect_applepay_intent(normalized: str, payments: List[str]) -> Optional[st
 def extract_signals(query: str) -> Signals:
     normalized = _normalize_query(query)
     card_kp = _ensure_card_kp()
-    card_names = _unique_in_order(card_kp.extract_keywords(normalized))
-    actions = _unique_in_order(_ACTION_KP.extract_keywords(normalized))
-    payments = _unique_in_order(_PAYMENT_KP.extract_keywords(normalized))
-    weak_intents = _unique_in_order(_WEAK_INTENT_KP.extract_keywords(normalized))
+    card_names = unique_in_order(card_kp.extract_keywords(normalized))
+    actions = unique_in_order(_ACTION_KP.extract_keywords(normalized))
+    payments = unique_in_order(_PAYMENT_KP.extract_keywords(normalized))
+    weak_intents = unique_in_order(_WEAK_INTENT_KP.extract_keywords(normalized))
 
     if not card_names:
-        card_names = _unique_in_order(_fallback_contains(get_card_name_synonyms(), normalized))
+        card_names = unique_in_order(_fallback_contains(get_card_name_synonyms(), normalized))
     if not actions:
-        actions = _unique_in_order(_fallback_contains(ACTION_SYNONYMS, normalized))
+        actions = unique_in_order(_fallback_contains(ACTION_SYNONYMS, normalized))
     if not payments:
-        payments = _unique_in_order(_fallback_contains(PAYMENT_SYNONYMS, normalized))
+        payments = unique_in_order(_fallback_contains(PAYMENT_SYNONYMS, normalized))
     if not weak_intents:
-        weak_intents = _unique_in_order(_fallback_contains(WEAK_INTENT_SYNONYMS, normalized))
+        weak_intents = unique_in_order(_fallback_contains(WEAK_INTENT_SYNONYMS, normalized))
 
     if not card_names:
         synonyms = get_card_name_synonyms()
-        card_names = _unique_in_order(_card_token_match(normalized, synonyms))
+        card_names = unique_in_order(_card_token_match(normalized, synonyms))
         if not card_names and len(normalized) >= FUZZY_MIN_LEN and fuzz is not None and process is not None:
             candidates, mapping = _ensure_card_fuzzy()
-            card_names = _unique_in_order(
+            card_names = unique_in_order(
                 _fuzzy_match(
                     normalized,
                     candidates,
@@ -447,17 +437,17 @@ def extract_signals(query: str) -> Signals:
 
     if not actions and len(normalized) >= FUZZY_MIN_LEN and fuzz is not None and process is not None:
         candidates, mapping = _ensure_action_fuzzy()
-        actions = _unique_in_order(_fuzzy_match(normalized, candidates, mapping))
+        actions = unique_in_order(_fuzzy_match(normalized, candidates, mapping))
 
     if not payments and len(normalized) >= FUZZY_MIN_LEN and fuzz is not None and process is not None:
         candidates, mapping = _ensure_payment_fuzzy()
-        payments = _unique_in_order(_fuzzy_match(normalized, candidates, mapping))
+        payments = unique_in_order(_fuzzy_match(normalized, candidates, mapping))
 
     actions = _filter_actions_with_weak_intents(actions, weak_intents, normalized, _WEAK_TERMS)
 
     pattern_hits = _match_compound_patterns(query)
     if pattern_hits:
-        actions = _unique_in_order([*actions, *pattern_hits])
+        actions = unique_in_order([*actions, *pattern_hits])
 
     applepay_intent = _detect_applepay_intent(normalized, payments)
     info_hint = _has_any_term(normalized, _INFO_HINT_TERMS)

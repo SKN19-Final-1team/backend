@@ -5,6 +5,7 @@ import re
 import time
 from typing import Any, Dict, List, Optional
 
+from app.rag.common.text_utils import unique_in_order
 from app.rag.postprocess.keywords import (
     BENEFIT_FILTER_TOKENS,
     ISSUE_FILTER_TOKENS,
@@ -27,6 +28,11 @@ GUIDE_INTENT_TOKENS = ISSUE_FILTER_TOKENS + BENEFIT_FILTER_TOKENS + (
 _SESSION_CONTEXT_ENABLED = os.getenv("RAG_SESSION_CONTEXT", "1") != "0"
 _SESSION_TTL_SEC = int(os.getenv("RAG_SESSION_TTL_SEC", "180"))
 _SESSION_TURN_TTL = int(os.getenv("RAG_SESSION_TURN_TTL", "3"))
+_CONSULT_COOLDOWN_SEC = int(os.getenv("RAG_CONSULT_COOLDOWN_SEC", "12"))
+_CONSULT_INTENT_THRESHOLD = float(os.getenv("RAG_CONSULT_INTENT_THRESHOLD", "0.6"))
+_CONSULT_MIN_KEYWORD_HITS = int(os.getenv("RAG_CONSULT_MIN_KEYWORD_HITS", "2"))
+_CONSULT_MIN_TURNS = int(os.getenv("RAG_CONSULT_MIN_TURNS", "2"))
+_CONSULT_MIN_SENTENCES = int(os.getenv("RAG_CONSULT_MIN_SENTENCES", "2"))
 
 
 def text_has_any_compact(text: str, tokens: tuple[str, ...]) -> bool:
@@ -55,17 +61,6 @@ def _as_list(value: object | None) -> List[str]:
     if isinstance(value, str):
         return [value]
     return [item for item in value if item]
-
-
-def _unique_in_order(items: List[str]) -> List[str]:
-    seen = set()
-    out: List[str] = []
-    for item in items:
-        if item in seen:
-            continue
-        seen.add(item)
-        out.append(item)
-    return out
 
 
 def _session_is_fresh(
@@ -110,13 +105,13 @@ def apply_session_context(
     boost = dict(routing.get("boost") or {})
     matched = dict(routing.get("matched") or {})
 
-    card_names = _unique_in_order(
+    card_names = unique_in_order(
         _as_list(matched.get("card_names") or filters.get("card_name") or boost.get("card_name"))
     )
-    intent_terms = _unique_in_order(
+    intent_terms = unique_in_order(
         _as_list(matched.get("actions") or filters.get("intent") or boost.get("intent"))
     )
-    weak_terms = _unique_in_order(
+    weak_terms = unique_in_order(
         _as_list(matched.get("weak_intents") or filters.get("weak_intent") or boost.get("weak_intent"))
     )
 
@@ -215,6 +210,48 @@ def apply_session_context(
     routing["boost"] = boost
     routing["matched"] = matched
     return routing
+
+
+def should_search_consult_cases(
+    query: str,
+    routing: Dict[str, Any],
+    session_state: Optional[Dict[str, Any]],
+) -> bool:
+    base_flag = bool(routing.get("need_consult_case_search"))
+
+    now = time.time()
+    last = None
+    if session_state:
+        last = session_state.get("consult_last_search_at")
+        if last and _CONSULT_COOLDOWN_SEC > 0 and (now - float(last)) < _CONSULT_COOLDOWN_SEC:
+            return False
+
+    keyword_hits = int(routing.get("consult_keyword_hits") or 0)
+    keyword_trigger = keyword_hits >= _CONSULT_MIN_KEYWORD_HITS
+
+    intent_confidence = None
+    if session_state and session_state.get("intent_confidence") is not None:
+        intent_confidence = float(session_state.get("intent_confidence"))
+    elif routing.get("intent_confidence") is not None:
+        intent_confidence = float(routing.get("intent_confidence"))
+    intent_trigger = intent_confidence is not None and intent_confidence >= _CONSULT_INTENT_THRESHOLD
+
+    turn_trigger = False
+    if session_state:
+        turn = int(session_state.get("turn") or 0)
+        if turn >= _CONSULT_MIN_TURNS:
+            turn_trigger = True
+        sentence_count = session_state.get("stt_sentence_count")
+        if sentence_count is not None and int(sentence_count) >= _CONSULT_MIN_SENTENCES:
+            turn_trigger = True
+
+    if not (base_flag or keyword_trigger or intent_trigger or turn_trigger):
+        return False
+
+    if session_state is not None:
+        session_state["consult_last_search_at"] = now
+        session_state["consult_last_query"] = query
+    return True
 
 
 def strict_guidance_script(script: str, docs: List[Dict[str, Any]]) -> str:
