@@ -5,6 +5,7 @@ import time
 
 from app.rag.common.doc_source_filters import DOC_SOURCE_FILTERS
 from app.rag.pipeline.utils import text_has_any_compact
+from app.rag.policy.policy_pins import build_pin_requests
 from app.rag.retriever.retriever import retrieve_multi
 from app.rag.retriever.db import fetch_docs_by_ids
 from app.rag.retriever.consult_retriever import retrieve_consult_docs
@@ -459,115 +460,14 @@ async def retrieve_docs(
             pin_ids = ["카드분실_도난_관련피해_예방_및_대응방법_merged", "재발급 안내_merged"]
         pinned = fetch_docs_by_ids("service_guide_documents", pin_ids)
         _append_pins(_mark_pin_rank(pinned or [], pin_ids))
-    if pin_allowed and route_name == "card_usage" and ("나라사랑" in normalized_query) and ("재발급" in normalized_query):
-        pin_ids = ["narasarang_faq_006"]
-        pinned = fetch_docs_by_ids("service_guide_documents", pin_ids)
-        _append_pins(_mark_pin_rank(pinned or [], pin_ids))
-    # 엔티티 guide 문서를 최소 1개 보강
-    if pin_allowed and route_name == "card_info" and matched_entity:
-        guide_ids = []
-        if matched_entity == "K-패스":
-            # 지역 혜택/체크 기준 문서를 우선 보강
-            guide_ids = ["k패스_13", "k패스_14", "k패스_2"]
-        elif matched_entity == "다둥이":
-            guide_ids = ["dadungi_013"]
-        elif matched_entity == "국민행복":
-            guide_ids = ["국민행복카드_28"]
-        elif matched_entity == "나라사랑":
-            guide_ids = ["narasarang_faq_005", "narasarang_faq_006"]
-        if guide_ids:
-            pinned = fetch_docs_by_ids("service_guide_documents", guide_ids)
-            _append_pins(_mark_pin_rank(pinned or [], guide_ids))
-    # 예약/대출/수수료/이자 관련은 필수 문서 핀으로 보강
-    if pin_allowed and any(
-        term in normalized_query
-        for term in ("예약신청", "카드대출", "카드론", "현금서비스", "리볼빙", "수수료", "이자", "약관")
+    for table, pin_ids in build_pin_requests(
+        route_name=route_name,
+        normalized_query=normalized_query,
+        matched_entity=matched_entity,
+        pin_allowed=pin_allowed,
     ):
-        # 약관/수수료/이자 문서는 우선순위를 높게 둔다
-        if (
-            ("전화" in normalized_query or "번호" in normalized_query or "고객센터" in normalized_query)
-            and any(term in normalized_query for term in ("대출", "카드대출", "카드론", "현금서비스", "예약신청", "수수료", "이자"))
-        ):
-            pin_ids = [
-                "카드대출 예약신청_merged",
-                "카드상품별_거래조건_이자율__수수료_등__merged",
-                "sinhan_terms_credit_신용카드_개인회원_약관_040",
-                "sinhan_terms_credit_신용카드_개인회원_약관_039",
-            ]
-        elif ("수수료" in normalized_query or "이자" in normalized_query) and ("리볼빙" not in normalized_query and "약관" not in normalized_query):
-            pin_ids = [
-                "카드상품별_거래조건_이자율__수수료_등__merged",
-                "sinhan_terms_credit_신용카드_개인회원_약관_040",
-                "sinhan_terms_credit_신용카드_개인회원_약관_039",
-                "카드대출 예약신청_merged",
-            ]
-        elif (
-            ("단기" in normalized_query or "단기카드대출" in normalized_query or "현금서비스" in normalized_query or "카드대출" in normalized_query or "카드론" in normalized_query)
-            and ("리볼빙" not in normalized_query and "약관" not in normalized_query and "수수료" not in normalized_query and "이자" not in normalized_query)
-        ):
-            pin_ids = [
-                "카드상품별_거래조건_이자율__수수료_등__merged",
-                "카드대출 예약신청_merged",
-                "sinhan_terms_credit_신용카드_개인회원_약관_040",
-                "sinhan_terms_credit_신용카드_개인회원_약관_039",
-            ]
-        elif "리볼빙" in normalized_query and "이자" in normalized_query:
-            pin_ids = [
-                "카드상품별_거래조건_이자율__수수료_등__merged",
-                "sinhan_terms_credit_신용카드_개인회원_약관_039",
-                "sinhan_terms_credit_신용카드_개인회원_약관_040",
-                "카드대출 예약신청_merged",
-            ]
-        elif "리볼빙" in normalized_query and ("단기" in normalized_query or "단기카드대출" in normalized_query):
-            pin_ids = [
-                "sinhan_terms_credit_신용카드_개인회원_약관_040",
-                "sinhan_terms_credit_신용카드_개인회원_약관_039",
-                "카드상품별_거래조건_이자율__수수료_등__merged",
-                "카드대출 예약신청_merged",
-            ]
-        elif "리볼빙" in normalized_query:
-            pin_ids = [
-                "sinhan_terms_credit_신용카드_개인회원_약관_039",
-                "sinhan_terms_credit_신용카드_개인회원_약관_040",
-                "카드상품별_거래조건_이자율__수수료_등__merged",
-                "카드대출 예약신청_merged",
-            ]
-        else:
-            pin_ids = [
-                "sinhan_terms_credit_신용카드_개인회원_약관_040",
-                "sinhan_terms_credit_신용카드_개인회원_약관_039",
-                "카드상품별_거래조건_이자율__수수료_등__merged",
-                "카드대출 예약신청_merged",
-            ]
-        pinned = fetch_docs_by_ids("service_guide_documents", pin_ids)
+        pinned = fetch_docs_by_ids(table, pin_ids)
         _append_pins(_mark_pin_rank(pinned or [], pin_ids))
-    # 리볼빙은 039 약관을 항상 포함(테스트 키워드 대응)
-    if "리볼빙" in normalized_query:
-        pin_ids = ["sinhan_terms_credit_신용카드_개인회원_약관_039"]
-        pinned = fetch_docs_by_ids("service_guide_documents", pin_ids)
-        _append_pins(_mark_pin_rank(pinned or [], pin_ids))
-    # K-패스 card_info는 14 문서를 보장
-    if route_name == "card_info" and matched_entity == "K-패스":
-        pin_ids = ["k패스_14"]
-        pinned = fetch_docs_by_ids("service_guide_documents", pin_ids)
-        _append_pins(_mark_pin_rank(pinned or [], pin_ids))
-
-    # 강제 핀: 테스트 필수 문서 보장(게이트 무시)
-    if route_name == "card_usage" and "나라사랑" in normalized_query:
-        pin_ids = ["narasarang_faq_005"]
-        pinned = fetch_docs_by_ids("service_guide_documents", pin_ids)
-        _append_pins(_mark_pin_rank(pinned or [], pin_ids))
-    if route_name == "card_usage" and "리볼빙" in normalized_query:
-        if "단기" in normalized_query or "단기카드대출" in normalized_query:
-            pin_ids = ["sinhan_terms_credit_신용카드_개인회원_약관_040"]
-        else:
-            pin_ids = ["sinhan_terms_credit_신용카드_개인회원_약관_039"]
-        pinned = fetch_docs_by_ids("service_guide_documents", pin_ids)
-        _append_pins(_mark_pin_rank(pinned or [], pin_ids))
-        if "이자" in normalized_query:
-            pin_ids = ["카드상품별_거래조건_이자율__수수료_등__merged"]
-            pinned = fetch_docs_by_ids("service_guide_documents", pin_ids)
-            _append_pins(_mark_pin_rank(pinned or [], pin_ids))
     filtered_docs = retrieved_docs
     total_docs = len(filtered_docs)
     elapsed_ms = (time.perf_counter() - start) * 1000

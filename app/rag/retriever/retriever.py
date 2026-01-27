@@ -4,6 +4,7 @@ import re
 import time
 
 from app.rag.router.router import route_query as _route_query
+from app.rag.common.text_utils import unique_in_order
 from app.rag.retriever.db import _is_card_table, _safe_table, text_search, vector_search
 from app.rag.retriever.rank import _collect_candidates, _finalize_candidates
 from app.rag.retriever.terms import (
@@ -12,7 +13,6 @@ from app.rag.retriever.terms import (
     _expand_guide_terms,
     _filter_guide_query_terms,
     _priority_terms,
-    _unique_in_order,
 )
 
 from app.rag.common.doc_source_filters import DOC_SOURCE_FILTERS
@@ -270,7 +270,7 @@ async def retrieve_multi(
         if intent_only and not _is_card_table(safe_table):
             intent_vals = _as_list(search_filters.get("intent", []))
             weak_vals = _as_list(search_filters.get("weak_intent", []))
-            guide_terms = _expand_guide_terms(_unique_in_order([*intent_vals, *weak_vals]))
+            guide_terms = _expand_guide_terms(unique_in_order([*intent_vals, *weak_vals]))
             if not guide_terms:
                 guide_terms = _filter_guide_query_terms(context.query_terms)
             

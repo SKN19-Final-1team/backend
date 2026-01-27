@@ -8,8 +8,9 @@ from app.rag.retriever.config import (
     MIN_GUIDE_CONTENT_LEN,
     RRF_K,
 )
+from app.rag.common.text_utils import unique_in_order
 from app.rag.retriever.db import _is_guide_table, text_search
-from app.rag.retriever.terms import SearchContext, _unique_in_order
+from app.rag.retriever.terms import SearchContext
 
 USE_VECTOR = os.getenv("RAG_USE_VECTOR", "1") != "0"
 USE_KEYWORD = os.getenv("RAG_USE_KEYWORD", "1") != "0"
@@ -236,7 +237,7 @@ def _count_term_matches(doc: Dict[str, object], terms: List[str]) -> int:
 
 
 def _guide_tokens(context: SearchContext) -> List[str]:
-    tokens = _unique_in_order(
+    tokens = unique_in_order(
         [
             *context.weak_terms,
             *context.category_terms,
@@ -261,7 +262,7 @@ def _intent_title_terms(intent_terms: List[str]) -> List[str]:
             expanded.append("분실")
         if "도난" in term:
             expanded.append("도난")
-    return _unique_in_order(expanded)
+    return unique_in_order(expanded)
 
 
 def _normalize_doc_fields(
@@ -407,7 +408,7 @@ def _keyword_rows(
         terms: List[str] = list(ctx.extra_terms)
         if ctx.category_terms:
             terms.extend(ctx.category_terms)
-        terms = _unique_in_order(terms)
+        terms = unique_in_order(terms)
         return [term for term in terms if term not in KEYWORD_STOPWORDS]
 
     search_mode = context.search_mode

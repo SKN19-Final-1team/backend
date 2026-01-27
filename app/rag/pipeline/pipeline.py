@@ -293,6 +293,7 @@ async def run_rag(
     docs = clean_card_docs(docs, query)
     t_retrieve = time.perf_counter()
     route_name = routing.get("route") or routing.get("ui_route")
+    llm_docs = docs
     if route_name == "card_usage":
         llm_card_top_n = 1
         if docs:
@@ -302,10 +303,10 @@ async def run_rag(
                 pin_rank_key = -pin_rank if isinstance(pin_rank, int) else -10**9
                 score = float(doc.get("score") or 0)
                 return (pinned, pin_rank_key, score)
-            docs = sorted(docs, key=_pin_sort_key, reverse=True)
-            docs = docs[:1]
+            llm_docs = sorted(docs, key=_pin_sort_key, reverse=True)[:1]
     if routing.get("route") == "card_info":
         docs = promote_definition_doc(docs)
+        llm_docs = docs
         llm_card_top_n = max(llm_card_top_n, 3)
         query_terms = extract_query_terms(query)
         if query_terms:
@@ -324,16 +325,18 @@ async def run_rag(
                         score += 1
                 return score
             docs = sorted(docs, key=_doc_score, reverse=True)
+            llm_docs = docs
         # card_info에서 card_products가 없으면 카드 생성 대신 확인 질문으로 전환
         if not filter_card_product_docs(docs):
             docs = []
+            llm_docs = []
             routing["card_info_no_products"] = True
 
     cache_status = "off"
     cards: List[Dict[str, Any]]
     guidance_script: str
-    ordered_doc_ids = [doc_cache_id(doc) for doc in docs]
-    if not docs:
+    ordered_doc_ids = [doc_cache_id(doc) for doc in llm_docs]
+    if not llm_docs:
         cards, guidance_script = build_rule_cards(query, docs)
     elif CARD_CACHE_ENABLED and llm_card_top_n > 0:
         cache_key = build_card_cache_key(
@@ -351,7 +354,7 @@ async def run_rag(
         else:
             cards, guidance_script = generate_detail_cards(
                 query=query,
-                docs=docs,
+                docs=llm_docs,
                 model=cfg.model,
                 temperature=0.0,
                 max_llm_cards=llm_card_top_n,
@@ -361,7 +364,7 @@ async def run_rag(
     else:
         cards, guidance_script = generate_detail_cards(
             query=query,
-            docs=docs,
+            docs=llm_docs,
             model=cfg.model,
             temperature=0.0,
             max_llm_cards=llm_card_top_n,

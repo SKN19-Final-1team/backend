@@ -5,6 +5,7 @@ import re
 import time
 from typing import Any, Dict, List, Optional
 
+from app.rag.common.text_utils import unique_in_order
 from app.rag.postprocess.keywords import (
     BENEFIT_FILTER_TOKENS,
     ISSUE_FILTER_TOKENS,
@@ -62,17 +63,6 @@ def _as_list(value: object | None) -> List[str]:
     return [item for item in value if item]
 
 
-def _unique_in_order(items: List[str]) -> List[str]:
-    seen = set()
-    out: List[str] = []
-    for item in items:
-        if item in seen:
-            continue
-        seen.add(item)
-        out.append(item)
-    return out
-
-
 def _session_is_fresh(
     updated_at: Optional[float],
     updated_turn: Optional[int],
@@ -115,13 +105,13 @@ def apply_session_context(
     boost = dict(routing.get("boost") or {})
     matched = dict(routing.get("matched") or {})
 
-    card_names = _unique_in_order(
+    card_names = unique_in_order(
         _as_list(matched.get("card_names") or filters.get("card_name") or boost.get("card_name"))
     )
-    intent_terms = _unique_in_order(
+    intent_terms = unique_in_order(
         _as_list(matched.get("actions") or filters.get("intent") or boost.get("intent"))
     )
-    weak_terms = _unique_in_order(
+    weak_terms = unique_in_order(
         _as_list(matched.get("weak_intents") or filters.get("weak_intent") or boost.get("weak_intent"))
     )
 

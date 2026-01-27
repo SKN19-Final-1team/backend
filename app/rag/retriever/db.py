@@ -12,6 +12,7 @@ from pgvector import Vector
 from pgvector.psycopg2 import register_vector
 
 from app.llm.base import get_openai_client
+from app.rag.common.text_utils import unique_in_order
 from app.rag.common.doc_source_filters import ALLOWED_SCOPE_FILTERS, DOC_SOURCE_FILTERS
 from app.rag.retriever.terms import (
     _as_list,
@@ -20,7 +21,6 @@ from app.rag.retriever.terms import (
     _expand_guide_terms,
     _expand_payment_terms,
     _extract_query_terms,
-    _unique_in_order,
 )
 
 logger = logging.getLogger(__name__)
@@ -316,7 +316,7 @@ def build_where_clause(
             if phone_group:
                 clauses.append(phone_group)
 
-        guide_terms = _expand_guide_terms(_unique_in_order([*intent_values, *weak_values]))
+        guide_terms = _expand_guide_terms(unique_in_order([*intent_values, *weak_values]))
         guide_group = _build_like_group(guide_terms, params)
         if guide_group:
             clauses.append(guide_group)
@@ -416,7 +416,7 @@ def vector_search(
                 weak_values = _as_list(filters.get("weak_intent"))
                 intent_only = _is_guide_table(table) and (intent_values or weak_values) and not card_values
                 if intent_only:
-                    fallback_terms = _expand_guide_terms(_unique_in_order([*intent_values, *weak_values]))
+                    fallback_terms = _expand_guide_terms(unique_in_order([*intent_values, *weak_values]))
                     fallback_params: List[str] = []
                     fallback_group = _build_title_like_group(fallback_terms, fallback_params)
                     if fallback_group:
@@ -454,7 +454,7 @@ def text_search(
     use_trgm = _TRGM_ENABLED and not _is_card_table(table)
     if scope_filter and guide_with_terms_filter and str(scope_filter) == guide_with_terms_filter:
         use_trgm = False
-    terms = _unique_in_order([t for t in terms if t])
+    terms = unique_in_order([t for t in terms if t])
     trgm_terms = [t for t in terms if len(t) >= _TRGM_MIN_LEN] if use_trgm else []
     if use_trgm and _TRGM_MAX_TERMS > 0:
         trgm_terms = trgm_terms[:_TRGM_MAX_TERMS]
