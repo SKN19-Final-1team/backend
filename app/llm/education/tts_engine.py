@@ -8,6 +8,8 @@ from typing import Dict, Any, Optional
 from pathlib import Path
 import torch
 
+os.environ["COQUI_TOS_AGREED"] = "1"
+
 # TTS 모델 전역 변수
 _tts_model = None
 _model_loaded = False
@@ -27,6 +29,8 @@ def load_tts_model():
     
     try:
         from TTS.api import TTS
+        # print("[TTS Engine] Text-only mode: TTS model loading disabled")
+        return None
         
         print("[TTS Engine] XTTS-v2 모델 로딩 중...")
         

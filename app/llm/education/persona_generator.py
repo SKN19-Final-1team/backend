@@ -99,7 +99,7 @@ def create_system_prompt(customer_profile: Dict[str, Any], difficulty: str = "be
 {chr(10).join(behavior_instructions) if behavior_instructions else '- 일반적인 고객입니다.'}
 
 ## 문의 목적
-당신의 목적은 카드를 분실하여 이에 대한 상담을 받고자 하는 것입니다.
+당신의 목적은 카드를 분실하여 상담을 받고자 하는 것입니다.
 
 ## 말투 특성
 - {tone_instruction}

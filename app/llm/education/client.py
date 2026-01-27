@@ -9,7 +9,7 @@ load_dotenv()
 RUNPOD_IP = os.getenv("RUNPOD_IP")
 RUNPOD_PORT = os.getenv("RUNPOD_PORT")
 RUNPOD_API_KEY = os.getenv("RUNPOD_API_KEY")
-RUNPOD_MODEL_NAME = "kanana-nano-2.1b-instruct"
+RUNPOD_MODEL_NAME = "WindyAle/kanana-nano-2.1B-tuned"
 
 RUNPOD_API_URL = f"http://{RUNPOD_IP}:{RUNPOD_PORT}/v1/chat/completions"
 _session = requests.Session()

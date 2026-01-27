@@ -66,22 +66,25 @@ JSON 형식으로만 출력하세요."""
 
     result = generate_json(prompt, system_prompt, temperature=0.2, max_tokens=300)
     
-    # 기본값 설정
     if not result:
-        return {
-            "personality_tags": ["normal", "polite"],
-            "communication_style": {
-                "tone": "neutral",
-                "speed": "moderate"
-            },
-            "llm_guidance": "일반적인 응대로 친절하게 안내해주세요."
-        }
+        result = {}
+        
+    # 필수 키 검증 및 기본값 채우기
+    defaults = {
+        "personality_tags": ["normal", "polite"],
+        "communication_style": {
+            "tone": "neutral",
+            "speed": "moderate"
+        },
+        "llm_guidance": "일반적인 응대로 친절하게 안내해주세요."
+    }
     
+    for key, default_val in defaults.items():
+        if key not in result:
+            print(f"[Feature Analyzer] Warning: Missing key '{key}' in analysis result. Using default.")
+            result[key] = default_val
+            
     return result
-
-
-
-
 
 def format_analysis_for_db(analysis: Dict[str, Any]) -> Dict[str, Any]:
     """

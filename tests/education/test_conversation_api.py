@@ -40,15 +40,19 @@ def test_full_conversation_flow():
     print("\n[2단계] 대화 진행")
     print("-" * 70)
     
-    test_messages = [
-        "안녕하세요, 상담원 홍길동입니다.",
-        "우선 본인확인 도와드리겠습니다. 성함과 생년월일 알려주시겠어요?",
-        "네, 도와드리겠습니다. 카드 번호를 알려주시겠어요?",
-    ]
-    
-    for i, agent_msg in enumerate(test_messages, 1):
-        print(f"\n턴 {i}:")
-        print(f"  상담원: {agent_msg}")
+    turn = 1
+    while True:
+        try:
+            agent_msg = input(f"\n턴 {turn} 상담원(당신): ").strip()
+        except EOFError:
+            break
+            
+        if agent_msg in ["종료", "quit", "exit"]:
+            print("대화를 종료합니다.")
+            break
+            
+        if not agent_msg:
+            continue
         
         msg_payload = {
             "message": agent_msg,
@@ -71,6 +75,8 @@ def test_full_conversation_flow():
         
         if msg_data.get('audio_url'):
             print(f"  🔊 TTS 오디오: {msg_data['audio_url']}")
+            
+        turn += 1
     
     # 3. 대화 히스토리 조회
     print("\n[3단계] 대화 히스토리 조회")
