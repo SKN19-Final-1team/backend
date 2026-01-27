@@ -1,4 +1,5 @@
 """
+print("DEBUG: Script started")
 tts_speaker.py 테스트 스크립트
 """
 from app.llm.education.persona_generator import create_system_prompt
