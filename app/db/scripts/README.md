@@ -143,12 +143,12 @@ python 04_verify_db_load.py
 
 **⚠️ 중요**: 
 - **팀원**: 프로젝트 루트에 `.env` 파일 생성 (`call-act/.env`)
-- **개인 개발**: `backend_dev/app/db/scripts/.env` 파일 생성 가능 (우선 사용, 개인 파일)
+- **개인 개발**: `backend/app/db/scripts/.env` 파일 생성 가능 (우선 사용, 개인 파일)
 - 스크립트는 다음 순서로 `.env` 파일을 읽습니다:
   1. `backend/app/db/scripts/.env` (있으면 우선 사용)
   2. 프로젝트 루트 `.env` (팀원 공용)
 
-**참고**: 개인 개발 환경(`backend_dev`)에서는 `backend_dev/app/db/scripts/.env`가 우선 사용됩니다.
+**참고**: 개인 개발 환경(`backend`)에서는 `backend/app/db/scripts/.env`가 우선 사용됩니다.
 
 ### .env 파일 생성 (팀원용)
 

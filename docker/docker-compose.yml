@@ -9,7 +9,7 @@ services:
       POSTGRES_PASSWORD: callact_pwd1
       POSTGRES_DB: callact_db
     ports:
-      - "5432:5432"
+      - "5555:5432"  # 호스트 포트 5555 사용 (Windows 동적 포트 예약 범위 회피)
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
