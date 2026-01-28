@@ -8,11 +8,15 @@ import asyncio
 import sys
 from pathlib import Path
 
+# 프로젝트 루트 경로 설정 (절대 경로 사용)
+current_file = Path(__file__).resolve()
+project_root = current_file.parent.parent.parent
+sys.path.insert(0, str(project_root))
+
 # 테스트 데이터 import
-sys.path.insert(0, str(Path(__file__).parent / "tests"))
 from tests.test_data.noisy_utterances import get_test_dataset
 
-from app.llm.sllm_refiner import refine_text
+from app.llm.delivery.deliverer import refine_text
 from app.rag.pipeline import run_rag, RAGConfig
 
 
@@ -36,6 +40,7 @@ def run_test():
     
     for i, (original, noisy, expected_keywords) in enumerate(test_data, 1):
         print(f"\n[{i}/{total_cases}] 테스트 중...")
+        print("입력: ", noisy)
         
         # 텍스트 정제
         start = time.time()
