@@ -64,29 +64,39 @@ async def get_personality(script):
     except Exception as e:
         print(f"런팟 통신 실패: {str(e)}")
         return "N1"
-    
-    
-def determine_personality(personality_history):
+
+
+def determine_personality(total_history):
     """
-    personality_history: 최근 상담 성향 리스트 (예: ['N1', 'S2', 'S2'])
+    total_history: 최근 상담 성향 리스트 (예: ['N1', 'S2', 'S2', 'N2'])
     index 0이 가장 오래된 상담, 마지막 index가 가장 최근 상담이라고 가정
-    """
-    if not personality_history:
-        return "데이터 없음"
     
-    # 빈도수 계산
-    counts = Counter(personality_history)
+    반환값: (최종 결정된 성향, 업데이트된 3개의 히스토리)
+    """
+    # ['N1', 'S2', 'S2', 'S3'] -> ['S2', 'S2', 'S3']
+    updated_history = (total_history)[-3:]
+        
+    # 업데이트된 3개 내에서 빈도수 계산
+    counts = Counter(updated_history)
     most_common = counts.most_common()
     
-    # 다수결 확인 (가장 많이 나온 성향이 2번 이상인 경우)
+    # 3개 중 2개 이상 일치하는 성향이 있으면 그것으로 결정
     if most_common[0][1] >= 2:
-        return most_common[0][0]
+        representative = most_common[0][0]
     
-    # 모두 다를 경우 -> 가장 최근 상담 성향 반영
-    # S5, S4, S1 같은 특정 키워드가 포함되어 있다면 우선 순위 부여
-    priority_codes = ['S5', 'S4', 'S1']
-    for code in priority_codes:
-        if code in personality_history:
-            return f"{code}"
-            
-    return personality_history[-1]
+    # 3개가 모두 다를 경우 (예: ['N1', 'S2', 'S3'])
+    else:
+        # 특정 성향에 우선 순위 부여
+        priority_codes = ['S3', 'S2', 'S1'] 
+        representative = None
+        
+        for code in priority_codes:
+            if code in updated_history:
+                representative = code
+                break
+        
+        # 우선 순위 코드도 없다면 가장 최신 결과를 선택
+        if not representative:
+            representative = total_history[-1]
+
+    return representative, updated_history
