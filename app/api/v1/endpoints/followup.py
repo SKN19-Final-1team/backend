@@ -2,6 +2,8 @@ from app.utils.evaluate_call import evaluate_call
 from app.llm.follow_up.feedback_generator import generate_feedback
 from app.llm.follow_up.summarize_generator import get_summarize
 from app.llm.follow_up.personality_generator import get_personality, determine_personality
+from app.db.scripts.modules.connect_db import connect_db
+from app.db.scripts.modules.update_customer import get_personality_history, update_customer
 from fastapi import APIRouter, UploadFile, File, HTTPException
 import time
 import asyncio
@@ -57,7 +59,7 @@ async def create_summary(file: UploadFile = File(...)):
 
 
 class SaveConsultationRequest(BaseModel):
-    customer_id: int      # 고객 ID
+    customer_id: str      # 고객 ID
     transcript: str       # 화자 분리된 전문
     summary: dict         # 수정된 요약본
     evaluation: dict      # 피드백/감정
@@ -66,24 +68,32 @@ class SaveConsultationRequest(BaseModel):
 @router.post("/save")
 async def save_consultation(data: SaveConsultationRequest):
     try:
-        # DB에서 최근 성향 이력 2개 조회 코드 추가
-        # mockdata
-        past_history = ["N1", "S2"] 
+        conn = connect_db()
+        
+        # DB에서 최근 성향 이력 3개 조회
+        past_history = get_personality_history(conn, data.customer_id)
+        print(past_history)
         
         # 현재 상담에서의 고객 성향 분석
         current_personality = await get_personality(data.transcript)
         
-        # 최종 성향 확정 (과거 2개 + 현재 1개)
-        total_history = (past_history + [current_personality])[-3:]
-        final_personality = determine_personality(total_history)
+        # 최종 성향 확정 (과거 3개 + 현재 1개)
+        total_history = (past_history + [current_personality])
+        print(total_history)
+        current_type_code, type_history = determine_personality(total_history)
         
-        # DB 저장 코드 추가
-        print(f"고객 {data.customer_id} 성향 업데이트: {final_personality}")
+        # 고객 정보 업데이트
+        print(f"최종 성향: {current_type_code}, 최종 히스토리: {type_history}")
+        update_customer(conn, data.customer_id, current_type_code, type_history)
+        
+        # 상담 내역 저장 코드 추가하기
+        
+        conn.close()
 
         return {
             "status": "success",
             "current_personality": current_personality,
-            "final_personality": final_personality,
+            "final_personality": type_history,
             "message": "상담 내역 및 고객 성향이 저장되었습니다."
         }
     except Exception as e:
