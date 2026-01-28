@@ -8,8 +8,9 @@ from app.rag.retriever.config import (
     MIN_GUIDE_CONTENT_LEN,
     RRF_K,
 )
+from app.rag.common.text_utils import unique_in_order
 from app.rag.retriever.db import _is_guide_table, text_search
-from app.rag.retriever.terms import SearchContext, _unique_in_order
+from app.rag.retriever.terms import SearchContext
 
 USE_VECTOR = os.getenv("RAG_USE_VECTOR", "1") != "0"
 USE_KEYWORD = os.getenv("RAG_USE_KEYWORD", "1") != "0"
@@ -156,6 +157,54 @@ def _doc_has_token(doc: Dict[str, object], tokens: List[str]) -> bool:
     return False
 
 
+def _extra_boost_for_filters(doc: Dict[str, object], context: SearchContext) -> float:
+    boost = 0.0
+    meta = doc.get("metadata") or {}
+    title = (doc.get("title") or "").lower()
+    content = (doc.get("content") or "").lower()
+    category_text = " ".join(
+        str(meta.get(key) or "")
+        for key in ("category", "category1", "category2")
+    ).lower()
+    region_terms = context.filters.get("region") or []
+    benefit_terms = context.filters.get("benefit_type") or []
+    for term in region_terms:
+        term_lower = str(term).lower()
+        if term_lower and (
+            term_lower in title or term_lower in content or term_lower in category_text
+        ):
+            boost += 0.08
+    for term in benefit_terms:
+        term_lower = str(term).lower()
+        if term_lower and (
+            term_lower in title or term_lower in content or term_lower in category_text
+        ):
+            boost += 0.08
+    return boost
+
+
+def _demotion_for_noise(doc: Dict[str, object], context: SearchContext) -> float:
+    title = (doc.get("title") or "").lower()
+    content = (doc.get("content") or "").lower()
+    text = f"{title} {content}"
+    query_terms = set(context.query_terms or [])
+    penalty = 0.0
+
+    issue_terms = {"결제", "승인", "오류", "실패", "안돼", "안됨", "거절"}
+    reissue_terms = {"재발급", "분실", "도난", "고객센터", "전화번호", "연락처"}
+    benefit_terms = {"혜택", "연회비", "발급", "다자녀", "지역", "경기", "충남", "통신", "한도", "실적"}
+
+    if query_terms & issue_terms and any(term in text for term in reissue_terms):
+        penalty -= 0.15
+    if query_terms & {"분실", "도난", "잃어버"} and any(term in text for term in benefit_terms):
+        penalty -= 0.15
+    query_compact = "".join(query_terms)
+    if "k패스" not in query_compact and ("k패스" in text or "k-패스" in text):
+        if context.route_name == "card_usage":
+            penalty -= 0.2
+    return penalty
+
+
 def _count_term_matches(doc: Dict[str, object], terms: List[str]) -> int:
     if not terms:
         return 0
@@ -188,7 +237,7 @@ def _count_term_matches(doc: Dict[str, object], terms: List[str]) -> int:
 
 
 def _guide_tokens(context: SearchContext) -> List[str]:
-    tokens = _unique_in_order(
+    tokens = unique_in_order(
         [
             *context.weak_terms,
             *context.category_terms,
@@ -213,7 +262,7 @@ def _intent_title_terms(intent_terms: List[str]) -> List[str]:
             expanded.append("분실")
         if "도난" in term:
             expanded.append("도난")
-    return _unique_in_order(expanded)
+    return unique_in_order(expanded)
 
 
 def _normalize_doc_fields(
@@ -335,10 +384,12 @@ def _score_candidate(
                             boost_score += _BOOST_GUIDE_COVERAGE * match_count
             if guide_tokens and not is_guide_doc and context.card_values and card_match_base:
                 boost_score -= _PENALTY_CARD_GUIDE
+            boost_score += _extra_boost_for_filters(doc, context)
     doc["rrf_boost"] = boost_score
     # 카드명 매칭이 있는 카드 상품은 card_info 시나리오에서 밀리지 않도록 추가 보너스
     if context.card_values and str(doc.get("table")) == "card_products" and card_match_base:
         boost_score += _CARD_TOP_BONUS
+    boost_score += _demotion_for_noise(doc, context)
     final_score = rrf_score + boost_score
     doc["score"] = final_score
     doc["rrf_score"] = rrf_score
@@ -357,7 +408,7 @@ def _keyword_rows(
         terms: List[str] = list(ctx.extra_terms)
         if ctx.category_terms:
             terms.extend(ctx.category_terms)
-        terms = _unique_in_order(terms)
+        terms = unique_in_order(terms)
         return [term for term in terms if term not in KEYWORD_STOPWORDS]
 
     search_mode = context.search_mode

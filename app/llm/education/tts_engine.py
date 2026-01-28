@@ -30,7 +30,7 @@ def load_tts_model():
     try:
         from TTS.api import TTS
         # print("[TTS Engine] Text-only mode: TTS model loading disabled")
-        return None
+        # return None
         
         print("[TTS Engine] XTTS-v2 모델 로딩 중...")
         
@@ -44,6 +44,8 @@ def load_tts_model():
             _tts_model = TTS("tts_models/multilingual/multi-dataset/xtts_v2", gpu=(device=="cuda"))
         except Exception as e:
             print(f"[TTS Engine] XTTS-v2 로딩 실패, 대체 모델 시도: {e}")
+            import traceback
+            traceback.print_exc()
             # 대체 모델: 한국어 지원 TTS
             try:
                 _tts_model = TTS("tts_models/ko/cv/vits", gpu=(device=="cuda"))

@@ -28,8 +28,7 @@ DOC_SUMMARY_PROMPT_VERSION = os.getenv("RAG_DOC_SUMMARY_PROMPT_VERSION", "v1")
 MAX_CARD_DOC_CHARS = DOC_SNIPPET_CHARS
 CARD_RETRY_BACKOFF_SEC = 0.6
 CARD_PROMPT_VERSION = os.getenv("RAG_CARD_PROMPT_VERSION", "v2-content-only")
-DOC_SUMMARY_CACHE_ENABLED = False  # doc summary cache removed; keep flag for compatibility
-
+DOC_SUMMARY_CACHE_ENABLED = False 
 def build_doc_summary_cache_key(*args, **kwargs):
     return None
 
@@ -38,6 +37,10 @@ def doc_summary_cache_get(key):
 
 def doc_summary_cache_set(key, summary):
     return None
+
+
+def _normalize_ws(text: str) -> str:
+    return re.sub(r"\s+", " ", text or "").strip()
 
 _TERM_RE = re.compile(r"[A-Za-z0-9가-힣]+")
 _SECTION_CUT_PATTERNS = [
@@ -102,7 +105,6 @@ def _extract_query_terms(query: str) -> List[str]:
 def _extract_relevant_snippets(query: str, content: str, limit: int) -> str:
     if not content:
         return ""
-    # Remove noisy tail sections and contact-heavy lines before extraction.
     cleaned_lines = []
     for line in content.splitlines():
         stripped = line.strip()
@@ -162,13 +164,26 @@ def _build_rule_summary(query: str, content: str) -> str:
     # 불릿/인사/문의/전화 패턴 제거
     summary = re.sub(r"^[\-•·\*\d\s]+", "", summary, flags=re.MULTILINE)
     summary = re.sub(r"(문의|연락처|전화|고객센터|콜센터)[^\n]*", "", summary)
+    summary = re.sub(r"\b\d{2,4}-\d{3,4}-\d{4}\b", "", summary)
+    summary = summary.replace("테디카드", "")
+    summary = summary.replace("신용정보 알림서비스", "")
     summary = re.sub(r"(^|\n)[가-힣]{2,5}님[\s,]*", "", summary)
     summary = summary.strip()
     return summary[:160]
 
 
+def _sanitize_card_content(text: str) -> str:
+    if not text:
+        return ""
+    phone_dash = r"[\-–—‑]"
+    cleaned = re.sub(rf"\b\d{{2,4}}{phone_dash}\d{{3,4}}{phone_dash}\d{{4}}\b", "", text)
+    cleaned = re.sub(r"\b\d{8,11}\b", "", cleaned)
+    cleaned = re.sub(r"(테디카드 고객센터|테디카드)", "", cleaned)
+    cleaned = cleaned.replace("신용정보 알림서비스", "")
+    return _normalize_ws(cleaned)
+
+
 def build_rule_cards(query: str, docs: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], str]:
-    """LLM을 거치지 않고 룰 기반 요약만으로 카드 생성."""
     if not docs:
         return [], ""
     cards = [_base_card(doc) for doc in docs]
@@ -308,7 +323,6 @@ def generate_detail_cards(
             else:
                 cache_miss += 1
 
-    # Fill non-cached cards with rule-based summaries so non-LLM docs stay relevant.
     for idx, doc in enumerate(docs):
         doc_id = str((doc.get("metadata") or {}).get("id") or doc.get("id") or "")
         if doc_id in cached_doc_ids:
@@ -405,6 +419,7 @@ def generate_detail_cards(
         merged["title"] = base["title"]
         merged["detailContent"] = base["detailContent"]
         merged["relevanceScore"] = base["relevanceScore"]
+        merged["content"] = _sanitize_card_content(str(merged.get("content") or ""))
         out[card_index] = merged
         summary = str(merged.get("content") or "")
         table = str(docs[card_index].get("table") or (docs[card_index].get("metadata") or {}).get("source_table") or "")

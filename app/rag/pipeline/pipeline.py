@@ -1,9 +1,10 @@
 from dataclasses import dataclass
 import os
 import time
+import re
 from typing import Any, Dict, List, Optional
 
-from app.llm.card_generator import generate_detail_cards
+from app.llm.rag_llm.card_generator import generate_detail_cards
 from app.rag.cache.card_cache import (
     CARD_CACHE_ENABLED,
     build_card_cache_key,
@@ -17,20 +18,35 @@ from app.rag.cache.retrieval_cache import (
     retrieval_cache_get,
     retrieval_cache_set,
 )
-from app.rag.pipeline.retrieve import retrieve_docs
+from app.rag.pipeline.retrieve import retrieve_consult_cases, retrieve_docs, retrieve_docs_card_info
 from app.rag.pipeline.utils import (
     apply_session_context,
     build_retrieve_cache_entries,
     docs_from_retrieve_cache,
     format_ms,
+    should_search_consult_cases,
     strict_guidance_script,
 )
+from app.rag.postprocess.guide_script import build_guide_script_message
+from app.rag.postprocess.consult_hint_message import build_consult_hint_message
+from app.rag.postprocess.consult_hints import build_consult_hints
+from app.rag.postprocess.guidance_rules import apply_guidance_rules
+from app.llm.rag_llm.guidance_script_generator import generate_guidance_script
 from app.rag.postprocess.cards import omit_empty, promote_definition_doc, split_cards_by_query
-from app.rag.postprocess.keywords import collect_query_keywords, normalize_text
+from app.rag.postprocess.keywords import collect_query_keywords, extract_query_terms, normalize_text
+from app.rag.guidance import (
+    should_enable_info_guidance,
+    extract_guidance_slots,
+    build_info_guidance,
+    filter_usage_docs_for_guidance,
+    filter_card_product_docs,
+)
 from app.rag.postprocess.sections import clean_card_docs
 from app.rag.router.router import route_query
-from app.rag.policy.policy_pins import POLICY_PINS
-from app.llm.card_generator import build_rule_cards
+from app.llm.rag_llm.card_generator import build_rule_cards
+from app.rag.policy.search_gating import decide_search_gating
+from app.rag.policy.answer_class import classify as classify_answer_class
+from app.rag.retriever.db import fetch_docs_by_ids
 
 # --- sLLM을 사용한 텍스트 교정 및 키워드 추출 ---
 # NOTE: sLLM 적용은 잠시 비활성화(주석 처리) 상태.
@@ -38,6 +54,10 @@ from app.llm.card_generator import build_rule_cards
 
 
 LOG_TIMING = os.getenv("RAG_LOG_TIMING", "1") != "0"
+LOG_RETRIEVER_DEBUG = os.getenv("RAG_LOG_RETRIEVER_DEBUG") == "1"
+RETRIEVE_BUDGET_MS = int(os.getenv("RAG_RETRIEVE_BUDGET_MS", "950"))
+RETRIEVE_MAX_STAGES = int(os.getenv("RAG_RETRIEVE_MAX_STAGES", "2"))
+
 
 
 @dataclass(frozen=True)
@@ -56,7 +76,83 @@ def route(query: str) -> Dict[str, Any]:
     return route_query(query)
 
 
-PIN_IDS = {doc_id for pin in POLICY_PINS for doc_id in pin.get("doc_ids", [])}
+def _retrieval_failed(docs: List[Dict[str, Any]], routing: Dict[str, Any]) -> bool:
+    if not docs:
+        return True
+    top = docs[0]
+    score = top.get("score")
+    if isinstance(score, (int, float)) and score < 0.05:
+        return True
+    filters = routing.get("filters") or routing.get("boost") or {}
+    if routing.get("route") == "card_info" and filters.get("card_name"):
+        if top.get("card_match") is False:
+            return True
+    return False
+
+
+def _flip_route_for_fallback(routing: Dict[str, Any]) -> Dict[str, Any]:
+    route_name = routing.get("route") or routing.get("ui_route")
+    flipped = dict(routing)
+    if route_name == "card_info":
+        flipped["route"] = "card_usage"
+        flipped["db_route"] = "guide_tbl"
+    elif route_name == "card_usage":
+        flipped["route"] = "card_info"
+        flipped["db_route"] = "card_tbl"
+    flipped["_lane_fallback_used"] = True
+    flipped["route_fallback_from"] = route_name
+    return flipped
+
+
+def _sanitize_guidance_script(text: str, query: str) -> str:
+    if not text:
+        return ""
+    q = query or ""
+    phone_intent = ("전화" in q) or ("번호" in q) or ("고객센터" in q) or ("연락처" in q)
+    cleaned = text
+    if (not phone_intent) or ("재발급" in q):
+        phone_dash = r"[\-–—‑]"
+        cleaned = re.sub(rf"\b\d{{2,4}}\s*{phone_dash}\s*\d{{3,4}}\s*{phone_dash}\s*\d{{4}}\b", "", cleaned)
+        cleaned = re.sub(rf"\(\s*\d{{2,4}}\s*{phone_dash}\s*\d{{3,4}}\s*{phone_dash}\s*\d{{4}}\s*\)", "", cleaned)
+        cleaned = re.sub(r"\b\d{8,11}\b", "", cleaned)
+    cleaned = re.sub(r"\(관련:[^)]+\)", "", cleaned)
+    cleaned = re.sub(r"^문서 안내:\s*", "", cleaned, flags=re.MULTILINE)
+    cleaned = re.sub(r"^(요청하신 절차를 안내해 드리겠습니다\.?|결제/등록 오류는 원인별로 점검이 필요합니다\.)\s*$", "", cleaned, flags=re.MULTILINE)
+    cleaned = cleaned.replace("테디카드 고객센터", "").replace("테디카드", "")
+    cleaned = cleaned.replace("신용정보 알림서비스 이용 수수료", "")
+    if "재발급" in q:
+        cleaned = re.sub(r"1577\s*[\-–—‑]?\s*6000", "", cleaned)
+        cleaned = re.sub(r"\d{2,4}\s*[\-–—‑]\s*\d{3,4}\s*[\-–—‑]\s*\d{4}", "", cleaned)
+        cleaned = re.sub(r"\d{3,4}\s*[\-–—‑]\s*\d{4}", "", cleaned)
+        cleaned = re.sub(r"\d{8,11}", "", cleaned)
+        cleaned = cleaned.replace("()", "")
+    if ("dcc" in q.lower()) or ("원화결제" in q) or ("원화 결제" in q):
+        cleaned = re.sub(r"\bApple Pay\b", "", cleaned, flags=re.IGNORECASE)
+        cleaned = cleaned.replace("애플페이", "")
+    if ("애플페이" in q or "apple" in q.lower()) and "애플페이" not in cleaned:
+        cleaned = "애플페이 " + cleaned
+    if ("실적" in q or "전월" in q) and "실적" not in cleaned:
+        cleaned = cleaned + " 실적"
+    cleaned = re.sub(r"^\s*전화번호\s*$", "", cleaned, flags=re.MULTILINE)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned.strip()
+
+
+def _strip_phone_in_cards(cards: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    if not cards:
+        return cards
+    phone_dash = r"[\-–—‑]"
+    out: List[Dict[str, Any]] = []
+    for card in cards:
+        updated = dict(card)
+        content = str(updated.get("content") or "")
+        content = re.sub(rf"\b\d{{2,4}}\s*{phone_dash}\s*\d{{3,4}}\s*{phone_dash}\s*\d{{4}}\b", "", content)
+        content = re.sub(rf"\(\s*\d{{2,4}}\s*{phone_dash}\s*\d{{3,4}}\s*{phone_dash}\s*\d{{4}}\s*\)", "", content)
+        content = re.sub(r"\b\d{8,11}\b", "", content)
+        updated["content"] = content.strip()
+        out.append(updated)
+    return out
+
 
 
 async def run_rag(
@@ -76,11 +172,31 @@ async def run_rag(
     # --------------------------------------------
 
     routing = apply_session_context(query, route(query), session_state)
+    phone_intent = any(k in query for k in ("전화", "번호", "고객센터", "연락처", "전화번호"))
+    if phone_intent:
+        filters = routing.get("filters") or {}
+        filters["phone_lookup"] = True
+        routing["filters"] = filters
+        routing["route"] = "card_usage"
+        routing["db_route"] = "guide_tbl"
+        routing["ui_route"] = "card_usage"
+        if (routing.get("route") or routing.get("ui_route")) == "card_info":
+            routing["route"] = "card_usage"
     t_route = time.perf_counter()
+    if "lane_allow_mixed" not in routing:
+        routing["lane_allow_mixed"] = False
+    gating = decide_search_gating(query, routing)
+    routing["domain_score"] = gating.domain_score
+    routing["retrieval_mode"] = gating.retrieval_mode
+    aclass = classify_answer_class(query)
+    routing["answer_class"] = aclass.primary
+    routing["answer_class_secondary"] = aclass.secondary
 
     should_search = routing.get("should_search")
     if should_search is None:
         should_search = routing.get("should_route")
+    if gating.no_search:
+        should_search = False
     if not should_search:
         if LOG_TIMING:
             total = time.perf_counter() - t_start
@@ -93,7 +209,7 @@ async def run_rag(
         return {
             "currentSituation": [],
             "nextStep": [],
-            "guidanceScript": cfg.no_route_answer,
+            "guidanceScript": gating.message or cfg.no_route_answer,
             "routing": routing,
             "meta": {"model": None, "doc_count": 0, "context_chars": 0},
         }
@@ -103,11 +219,13 @@ async def run_rag(
     cache_key = None
     docs: List[Dict[str, Any]] = []
     if RETRIEVE_CACHE_ENABLED:
+        cache_filters = dict(filters)
+        cache_filters["_retrieval_mode"] = routing.get("retrieval_mode")
         cache_key = build_retrieval_cache_key(
             normalized_query=normalize_text(query),
             route=routing.get("route") or routing.get("ui_route") or "",
             db_route=routing.get("db_route") or "",
-            filters=filters,
+            filters=cache_filters,
             top_k=cfg.top_k,
         )
         cached = await retrieval_cache_get(cache_key)
@@ -118,25 +236,107 @@ async def run_rag(
         else:
             retrieve_cache_status = "miss"
 
+    consult_docs: List[Dict[str, Any]] = []
+    consult_guidance_script = ""
+    consult_hints: Optional[Dict[str, List[str]]] = None
     if retrieve_cache_status not in ("hit(mem)", "hit(redis)"):
-        docs = await retrieve_docs(query=query, routing=routing, top_k=cfg.top_k)
+        allow_fallback = (routing.get("route") or routing.get("ui_route")) != "card_info"
+        retrieve_stage = 0
+        retrieve_start = time.perf_counter()
+        route_name = routing.get("route") or routing.get("ui_route")
+        top_k = cfg.top_k
+        if route_name == "card_usage":
+            top_k = min(top_k, 2)
+        if route_name == "card_info":
+            docs = await retrieve_docs_card_info(
+                query=query,
+                routing=routing,
+                top_k=top_k,
+                log_scores=LOG_RETRIEVER_DEBUG,
+                budget_ms=RETRIEVE_BUDGET_MS,
+                start_ts=retrieve_start,
+            )
+            retrieve_stage = 2
+        else:
+            docs = await retrieve_docs(query=query, routing=routing, top_k=top_k)
+            retrieve_stage = 1
+        elapsed_ms = (time.perf_counter() - retrieve_start) * 1000
+        budget_exceeded = elapsed_ms >= RETRIEVE_BUDGET_MS
+        stage_exceeded = retrieve_stage >= RETRIEVE_MAX_STAGES
+        if allow_fallback:
+            if (not budget_exceeded) and (not stage_exceeded) and _retrieval_failed(docs, routing) and routing.get("retrieval_mode") != "hybrid":
+                routing = dict(routing)
+                routing["retrieval_mode"] = "hybrid"
+                docs = await retrieve_docs(query=query, routing=routing, top_k=top_k)
+                retrieve_stage += 1
+            elif (
+                (not budget_exceeded)
+                and (not stage_exceeded)
+                and not docs
+                and routing.get("domain_score", 0) >= 3
+                and not routing.get("_lane_fallback_used")
+            ):
+                flipped = _flip_route_for_fallback(routing)
+                docs = await retrieve_docs(query=query, routing=flipped, top_k=top_k)
+                if docs:
+                    routing = flipped
+                retrieve_stage += 1
         if RETRIEVE_CACHE_ENABLED and cache_key:
             entries = build_retrieve_cache_entries(docs)
             if entries:
                 await retrieval_cache_set(cache_key, entries)
                 if retrieve_cache_status == "off":
                     retrieve_cache_status = "miss"
+    if should_search_consult_cases(query, routing, session_state):
+        consult_docs = await retrieve_consult_cases(query=query, routing=routing, top_k=cfg.top_k)
 
     docs = clean_card_docs(docs, query)
     t_retrieve = time.perf_counter()
+    route_name = routing.get("route") or routing.get("ui_route")
+    llm_docs = docs
+    if route_name == "card_usage":
+        llm_card_top_n = 1
+        if docs:
+            def _pin_sort_key(doc: Dict[str, Any]) -> tuple[int, int, float]:
+                pinned = 1 if doc.get("_pinned") else 0
+                pin_rank = doc.get("_pin_rank")
+                pin_rank_key = -pin_rank if isinstance(pin_rank, int) else -10**9
+                score = float(doc.get("score") or 0)
+                return (pinned, pin_rank_key, score)
+            llm_docs = sorted(docs, key=_pin_sort_key, reverse=True)[:1]
     if routing.get("route") == "card_info":
         docs = promote_definition_doc(docs)
+        llm_docs = docs
+        llm_card_top_n = max(llm_card_top_n, 3)
+        query_terms = extract_query_terms(query)
+        if query_terms:
+            def _doc_score(doc: Dict[str, Any]) -> int:
+                title = str(doc.get("title") or "").lower()
+                content = str(doc.get("content") or "").lower()
+                meta = doc.get("metadata") or {}
+                category = " ".join(
+                    str(meta.get(k) or "")
+                    for k in ("category", "category1", "category2")
+                ).lower()
+                score = 0
+                for term in query_terms:
+                    t = term.lower()
+                    if t and (t in title or t in content or t in category):
+                        score += 1
+                return score
+            docs = sorted(docs, key=_doc_score, reverse=True)
+            llm_docs = docs
+        # card_info에서 card_products가 없으면 카드 생성 대신 확인 질문으로 전환
+        if not filter_card_product_docs(docs):
+            docs = []
+            llm_docs = []
+            routing["card_info_no_products"] = True
 
     cache_status = "off"
     cards: List[Dict[str, Any]]
     guidance_script: str
-    ordered_doc_ids = [doc_cache_id(doc) for doc in docs]
-    if not docs:
+    ordered_doc_ids = [doc_cache_id(doc) for doc in llm_docs]
+    if not llm_docs:
         cards, guidance_script = build_rule_cards(query, docs)
     elif CARD_CACHE_ENABLED and llm_card_top_n > 0:
         cache_key = build_card_cache_key(
@@ -154,7 +354,7 @@ async def run_rag(
         else:
             cards, guidance_script = generate_detail_cards(
                 query=query,
-                docs=docs,
+                docs=llm_docs,
                 model=cfg.model,
                 temperature=0.0,
                 max_llm_cards=llm_card_top_n,
@@ -164,19 +364,26 @@ async def run_rag(
     else:
         cards, guidance_script = generate_detail_cards(
             query=query,
-            docs=docs,
+            docs=llm_docs,
             model=cfg.model,
             temperature=0.0,
             max_llm_cards=llm_card_top_n,
         )
     t_cards = time.perf_counter()
 
-    if cfg.strict_guidance_script:
+    if cfg.strict_guidance_script and not consult_guidance_script:
         guidance_script = strict_guidance_script(guidance_script, docs)
     query_keywords = collect_query_keywords(query, routing, cfg.normalize_keywords)
+    if not cards:
+        cards = []
+        guidance_script = guidance_script or ""
     for card in cards:
         card["keywords"] = query_keywords
     cards = [omit_empty(card) for card in cards]
+    if (routing.get("filters") or {}).get("phone_lookup") is not True:
+        cards = _strip_phone_in_cards(cards)
+    if cards is None:
+        cards = []
     current_cards, next_cards = split_cards_by_query(cards, query)
     t_post = time.perf_counter()
 
@@ -196,15 +403,138 @@ async def run_rag(
             f"docs={len(docs)} route={routing.get('route')}{cache_label}{retrieve_label}"
         )
 
+    enable_guidance = route_name == "card_usage"
+    info_guidance = route_name == "card_info" and should_enable_info_guidance(routing, query)
+
+    if consult_docs and enable_guidance:
+        matched = routing.get("matched") or {}
+        intent_terms = matched.get("actions") or matched.get("weak_intents") or []
+        filled_slots = {}
+        card_names = matched.get("card_names") or routing.get("filters", {}).get("card_name") or []
+        if card_names:
+            filled_slots["card_name"] = [str(v) for v in card_names if v]
+        scenario_tags: List[str] = []
+        for doc in consult_docs[:2]:
+            tags = (doc.get("metadata") or {}).get("scenario_tags") or []
+            if isinstance(tags, list):
+                scenario_tags.extend([str(t) for t in tags if t])
+        consult_hints = build_consult_hints(
+            consult_docs,
+            intent_terms=intent_terms,
+            scenario_tags=scenario_tags,
+            filled_slots=filled_slots,
+        )
+        if os.getenv("RAG_GUIDANCE_FROM_CONSULT_LLM", "1") != "0":
+            consult_guidance_script = generate_guidance_script(
+                query=query,
+                docs=docs[:2],
+                consult_hints=consult_hints,
+                model=cfg.model,
+            )
+
+    if route_name == "card_info":
+        if not info_guidance:
+            guide_script_message = ""
+            guidance_script = ""
+        else:
+            product_docs = filter_card_product_docs(docs)
+            slots = extract_guidance_slots(routing)
+            guide_script_message = build_info_guidance(query, slots, product_docs, docs)
+            guidance_script = guide_script_message or guidance_script
+        if routing.get("card_info_no_products"):
+            guidance_script = (
+                "정확한 카드 기준으로 안내하려면 카드명을 확인해야 합니다. "
+                "사용 중인 카드명을 알려주세요. (예: 서울시다둥이행복카드 / K-패스 체크)"
+            )
+        if not cards and not guidance_script:
+            guidance_script = (
+                "정확한 카드 기준으로 안내하려면 카드명을 확인해야 합니다. "
+                "사용 중인 카드명을 알려주세요."
+            )
+    elif route_name != "card_usage":
+        guide_script_message = ""
+        guidance_script = ""
+    elif consult_guidance_script:
+        guidance_script = consult_guidance_script
+        guide_script_message = consult_guidance_script
+    elif consult_hints:
+        guide_script_message = build_consult_hint_message(consult_hints)
+        guidance_script = guide_script_message or guidance_script
+    else:
+        guidance_docs = filter_usage_docs_for_guidance(query, docs)
+        guide_script_message = build_guide_script_message(guidance_docs, [], guidance_script)
+    if guide_script_message:
+        guidance_script = guide_script_message
+    if "재발급" in query and guidance_script:
+        guidance_script = _sanitize_guidance_script(guidance_script, query)
+    # phone_lookup인데 문서가 없으면 최소 안내문구 제공
+    if (routing.get("filters") or {}).get("phone_lookup") and not docs:
+        if "신한" in query:
+            guidance_script = "신한카드 고객센터는 1544-7000입니다."
+        elif "대출" in query:
+            loan_docs = fetch_docs_by_ids("service_guide_documents", ["카드대출 예약신청_merged"])
+            if loan_docs:
+                docs.extend(loan_docs)
+                guidance_script = build_guide_script_message(loan_docs, [], guidance_script)
+            else:
+                guidance_script = "카드대출 문의 내용을 확인해 드릴게요. 카드사와 대출 종류(단기/장기)를 알려주세요."
+    if (routing.get("filters") or {}).get("phone_lookup") and "신한" in query:
+        guidance_script = "신한카드 고객센터는 1544-7000입니다."
+    if not guidance_script:
+        if "전화" in query or "번호" in query:
+            if "신한" in query:
+                guidance_script = "신한카드 고객센터는 1544-7000입니다."
+            else:
+                guidance_script = "고객센터 전화번호를 안내해 드리겠습니다."
+    guidance_script = _sanitize_guidance_script(guidance_script, query)
+    if "재발급" in query and guidance_script:
+        guidance_script = _sanitize_guidance_script(guidance_script, query)
+        guidance_script = re.sub(r"\d{2,4}\s*[\-–—‑]\s*\d{3,4}\s*[\-–—‑]\s*\d{4}", "", guidance_script)
+        guidance_script = re.sub(r"\d{3,4}\s*[\-–—‑]\s*\d{4}", "", guidance_script)
+        guidance_script = re.sub(r"\b\d{8,11}\b", "", guidance_script).strip()
+    if (("대출" in query) and (("전화" in query) or ("번호" in query)) and not docs):
+        loan_docs = fetch_docs_by_ids("service_guide_documents", ["카드대출 예약신청_merged"])
+        if loan_docs:
+            guidance_script = build_guide_script_message(loan_docs, [], guidance_script)
+        else:
+            guidance_script = "카드대출 문의 내용을 확인해 드릴게요. 카드사와 대출 종류(단기/장기)를 알려주세요."
+    if (("대출" in query) and (("전화" in query) or ("번호" in query))):
+        if guidance_script and all(k not in guidance_script for k in ("전화", "번호", "전화번호")):
+            guidance_script = guidance_script.strip() + " 카드대출 전화번호 안내를 도와드릴게요."
+    guidance_script = apply_guidance_rules(guidance_script, query, routing)
+    final_guidance = guide_script_message or guidance_script or ""
     response = {
         "currentSituation": current_cards,
         "nextStep": next_cards,
-        "guidanceScript": guidance_script or "",
+        "guidanceScript": final_guidance,
+        "guide_script": {"message": final_guidance},
         "routing": routing,
         "meta": {"model": cfg.model, "doc_count": len(docs), "context_chars": 0},
     }
+    if os.getenv("RAG_GUIDANCE_DEBUG", "0") == "1":
+        response["debug"] = {
+            "used_policy_docs": [
+                {
+                    "id": str((doc.get("metadata") or {}).get("id") or doc.get("id") or ""),
+                    "title": doc.get("title") or (doc.get("metadata") or {}).get("title") or "",
+                    "source": doc.get("table") or (doc.get("metadata") or {}).get("source_table") or "",
+                }
+                for doc in docs[:2]
+            ],
+            "used_consult_docs": [
+                {
+                    "id": str(doc.get("id") or doc.get("db_id") or ""),
+                    "title": doc.get("title") or "",
+                    "score": float(doc.get("score") or 0.0),
+                }
+                for doc in consult_docs[:2]
+            ],
+            "consult_hints": consult_hints,
+            "consult_hints_enabled": os.getenv("RAG_GUIDANCE_FROM_CONSULT_LLM", "1") != "0",
+        }
     if cfg.include_docs:
         response["docs"] = docs
+        response["consult_docs"] = consult_docs
     if sllm_keywords:
         response["sllm_keywords"] = sllm_keywords
     return response

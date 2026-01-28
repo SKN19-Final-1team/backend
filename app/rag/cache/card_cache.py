@@ -6,7 +6,7 @@ import json
 import os
 import time
 
-from app.llm.card_generator import CARD_PROMPT_VERSION
+from app.llm.rag_llm.card_generator import CARD_PROMPT_VERSION
 
 try:
     import redis.asyncio as redis_async
