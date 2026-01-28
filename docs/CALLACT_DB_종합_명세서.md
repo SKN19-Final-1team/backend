@@ -47,29 +47,29 @@ CALL:ACT는 카드사 콜센터 상담사를 위한 실시간 상담 지원 + �
 
 | 컬럼 | 타입 | 설명 |
 |------|------|------|
-| id | VARCHAR(50) PK | 직원 ID (예: `EMP001`) |
+| id | VARCHAR(50) PK | 직원 ID (예: `EMP-001`) |
 | name | VARCHAR(100) | 이름 |
 | email | VARCHAR(100) UNIQUE | 이메일 |
-| role | VARCHAR(50) | 직급 (사원, 대리, 과장 등) |
-| department | VARCHAR(100) | 부서 (상담1팀~상담6팀, IT팀, 관리팀, 교육팀) |
+| position | VARCHAR(50) | 직급 (사원, 주임, 대리, 과장, 팀장) |
+| team | VARCHAR(100) | 부서 (상담1팀~상담3팀, IT팀, 관리팀, 교육팀) |
 | hire_date | DATE | 입사일 |
 | status | status_type | 상태 (active, inactive, suspended, vacation) |
 | consultations | INTEGER | 상담 건수 (DB 실데이터 기반 업데이트) |
 | fcr | INTEGER | FCR 비율 0-100 (DB 실데이터 기반) |
-| "avgTime" | VARCHAR(20) | 평균 상담 시간 "MM:SS" (DB 실데이터 기반) |
+| "avgTime" | VARCHAR(20) | 평균 상담 시간 "M:SS" 또는 "MM:SS" (DB 실데이터 기반) |
 | rank | INTEGER | 성과 순위 (DB 실데이터 기반) |
 | created_at | TIMESTAMP | 생성일 |
 | updated_at | TIMESTAMP | 수정일 |
 
 - **데이터 건수**: 70명 (상담팀 60명 + IT팀 5명 + 관리팀 3명 + 교육팀 2명)
-- **인덱스**: role, department, status
+- **인덱스**: position, team, status
 - **비고**: IT/관리/교육팀은 상담 배정 대상에서 제외. 성과 지표(consultations, fcr, avgTime, rank)는 consultations 테이블 실데이터 기반으로 자동 계산됨.
 
 #### consultations (상담 이력)
 
 | 컬럼 | 타입 | 설명 |
 |------|------|------|
-| id | VARCHAR(100) PK | 상담 ID (예: `CS-EMP001-202501191432`) |
+| id | VARCHAR(100) PK | 상담 ID (예: `CS-EMP-001-202501191432`) |
 | agent_id | VARCHAR(50) FK | 상담사 ID → employees(id) |
 | customer_id | VARCHAR(50) FK | 고객 ID → customers(id) |
 | call_date | DATE | 상담 날짜 |
@@ -155,14 +155,14 @@ CALL:ACT는 카드사 콜센터 상담사를 위한 실시간 상담 지원 + �
 
 | 컬럼 | 타입 | 설명 |
 |------|------|------|
-| id | VARCHAR(50) PK | 고객 ID (예: `CUST-00001`) |
+| id | VARCHAR(50) PK | 고객 ID (예: `CUST-TEDDY-00001`) |
 | name | VARCHAR(100) | 이름 |
 | phone | VARCHAR(20) | 전화번호 |
 | gender | VARCHAR(10) | 성별 (male, female, unknown) |
 | age_group | VARCHAR(10) | 연령대 (20대, 30대, ...) |
 | birth_date | DATE | 생년월일 |
 | address | VARCHAR(200) | 주소 |
-| grade | VARCHAR(20) | 등급 (GENERAL, SILVER, GOLD, VIP, VVIP) |
+| grade | VARCHAR(20) | 등급 (GENERAL, SILVER, GOLD, VIP) |
 | card_type | VARCHAR(50) | 카드 유형 |
 | card_number_last4 | VARCHAR(4) | 카드번호 뒷4자리 |
 | card_brand | VARCHAR(30) | 카드 브랜드 |
@@ -201,18 +201,18 @@ CALL:ACT는 카드사 콜센터 상담사를 위한 실시간 상담 지원 + �
 
 | 코드 | 유형명 | 설명 |
 |------|--------|------|
-| N1 | 일반-빠른해결형 | 빠른 문제 해결 선호 |
-| N2 | 일반-꼼꼼한형 | 상세 설명 선호 |
-| N3 | 일반-친근한형 | 친근한 대화 선호 |
-| N4 | 일반-무관심형 | 최소한의 대화 선호 |
-| S1 | 특수-VIP고객 | VIP 등급 고객 |
-| S2 | 특수-고령자 | 고령 고객 (느린 설명) |
-| S3 | 특수-외국인 | 외국인 고객 |
-| S4 | 특수-장애인 | 장애인 고객 |
-| S5 | 특수-법인고객 | 법인/기업 고객 |
-| S6 | 특수-민원고객 | 불만/민원 고객 |
-| S7 | 특수-금융취약계층 | 금융 이해도 낮은 고객 |
-| S8 | 특수-긴급상황 | 분실/도난 등 긴급 상황 |
+| N1 | 일반친절형 | 일반적인 응대, 친절한 안내 선호 |
+| N2 | 조용한내성형 | 간결한 답변 선호, 불필요한 대화 최소화 |
+| N3 | 실용주의형 | 목적 지향적, 해결책 먼저 제시 |
+| N4 | 친화적수다형 | 대화를 즐기는 고객, 친근한 응대 |
+| S1 | 급한성격형 | 빠른 답변 선호, 간결한 핵심 전달 |
+| S2 | 꼼꼼상세형 | 상세한 설명 필요, 차근차근 안내 |
+| S3 | 감정호소형 | 경청·공감 후 해결책 제시 |
+| S4 | 시니어친화형 | 쉬운 용어, 천천히 반복 안내 |
+| S5 | 디지털네이티브 | 앱/웹 셀프서비스 경로 우선 안내 |
+| S6 | VIP고객형 | 프리미엄 서비스, 신속 처리 |
+| S7 | 반복민원형 | 이전 상담 이력 확인, 확실한 해결책 제시 |
+| S8 | 불만항의형 | 차분하게 경청 후 해결 방안 제시 |
 
 ---
 
