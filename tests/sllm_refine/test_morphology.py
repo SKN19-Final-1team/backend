@@ -25,6 +25,11 @@ def test_user_dictionary():
     print("사용자사전 생성 테스트")
     print("=" * 70)
     
+    # 분석기를 한번 호출하여 내부적으로 create_user_dictionary()가 실행되게 함
+    print(">>> 시스템 초기화 중 (사용자 사전 생성)...")
+    analyze_morphemes("초기화") 
+    
+    # 초기화 후 상태 확인
     stats = get_user_dict_stats()
     
     if stats["exists"]:
@@ -34,6 +39,7 @@ def test_user_dictionary():
         print(f"  KOMORAN 로드: {stats['komoran_loaded']}")
     else:
         print("✗ 사용자사전 없음")
+        print("  (Tip: DB 연결이 실패했거나, keyword_dictionary 테이블에 데이터가 없는지 확인하세요)")
     print()
 
 
