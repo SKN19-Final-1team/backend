@@ -28,15 +28,19 @@ SYSTEM_PROMPT = """
 
 load_dotenv()
 
+# client = AsyncOpenAI(
+#     base_url=os.getenv("RUNPOD_URL"),
+#     api_key=os.getenv("API_KEY")
+# )
+
 client = AsyncOpenAI(
-    base_url=os.getenv("RUNPOD_URL"),
-    api_key=os.getenv("API_KEY")
+    api_key=os.getenv("OPENAI_API_KEY")
 )
 
 async def get_summarize(script):
     try:
         response = await client.chat.completions.create(
-            model="local-model",
+            model="gpt-4.1-mini",
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": f"상담 전문:\n{script}"}
