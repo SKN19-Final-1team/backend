@@ -1,13 +1,13 @@
 import redis.asyncio as redis
 import json
 from app.audio.diarizer import call_diarizer_fulltext, merge_batches
-
+from app.core.config import DIALOGUE_REDIS_URL
 
 class DiarizationManager:
     def __init__(self, session_id, client):
         self.session_id = session_id
         self.client = client
-        self.redis_url = "redis://127.0.0.1:6379/1"
+        self.redis_url = DIALOGUE_REDIS_URL
         self.redis = redis.from_url(self.redis_url, decode_responses=True)
         self.buffer = []              # 아직 화자 분리가 안 된 STT 파편들
         self.global_items = []        # 화자 분리가 완료된 최종 대화

@@ -15,8 +15,10 @@ async def websocket_endpoint(websocket: WebSocket):
     os.environ.setdefault("RAG_LOG_TIMING", "1")
     await websocket.accept()
     session_id = str(uuid.uuid4())[:8]
+    
     print(f"[{session_id}] 웹소켓 연결 완료")
-
+    await websocket.send_json(session_id)
+    
     whisper_service = WhisperService()
     diarizer_manager = DiarizationManager(session_id, client)
     session_state = {}
@@ -38,21 +40,21 @@ async def websocket_endpoint(websocket: WebSocket):
 
     async def on_transcription_result(text: str):
         print(f"[{session_id}] STT 원문 : {text}")
-       
+               
         try:
             # --- STT 1차 보정 ---
             # 상준님 함수 추가
             refined_text = text
             
             # --- RAG 실행 ---
-            # result = await run_rag(
-            #     refined_text,
-            #     config=RAGConfig(top_k=4, normalize_keywords=True),
-            #     session_state=session_state,
-            # )
+            result = await run_rag(
+                refined_text,
+                config=RAGConfig(top_k=4, normalize_keywords=True),
+                session_state=session_state,
+            )
             
-            # if result:
-            #     await websocket.send_json({"type": "rag", "data": result})
+            if result:
+                await websocket.send_json({"type": "rag", "data": result})
             
             # --- 실시간 화자분리 및 Redis 저장 ---
             asyncio.create_task(diarizer_manager.add_fragment(refined_text, DIAR_SYSTEM_PROMPT))

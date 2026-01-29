@@ -33,6 +33,10 @@ client = AsyncOpenAI(
     api_key=os.getenv("API_KEY")
 )
 
+# client = AsyncOpenAI(
+#     api_key=os.getenv("OPENAI_API_KEY")
+# )
+
 async def get_summarize(script):
     try:
         response = await client.chat.completions.create(
