@@ -6,6 +6,7 @@ from openai import AsyncOpenAI
 from app.audio.whisper import WhisperService
 from app.rag.pipeline import RAGConfig, run_rag
 from app.audio.diarizer_manager import DiarizationManager
+from app.llm.delivery.deliverer import refine_text
 
 router = APIRouter()
 client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -43,21 +44,27 @@ async def websocket_endpoint(websocket: WebSocket):
                
         try:
             # --- STT 1차 보정 ---
-            # 상준님 함수 추가
-            refined_text = text
+            refined_result = refine_text(text)
+            print(f"정제된 텍스트 : {refined_result}")
+            
+            if isinstance(refined_result, dict):
+                final_text = refined_result.get('text', '')
+            else:
+                final_text = refined_result
             
             # --- RAG 실행 ---
             # result = await run_rag(
-            #     refined_text,
+            #     final_text,
             #     config=RAGConfig(top_k=4, normalize_keywords=True),
             #     session_state=session_state,
             # )
             
             # if result:
             #     await websocket.send_json({"type": "rag", "data": result})
-            
+
             # --- 실시간 화자분리 및 Redis 저장 ---
-            asyncio.create_task(diarizer_manager.add_fragment(refined_text, DIAR_SYSTEM_PROMPT))
+            if final_text:
+                asyncio.create_task(diarizer_manager.add_fragment(final_text, DIAR_SYSTEM_PROMPT))
 
         except Exception as e:
             print(f"[{session_id}] 처리 중 에러 : {e}")
