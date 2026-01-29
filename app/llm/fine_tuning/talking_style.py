@@ -2,81 +2,59 @@ import pandas as pd
 import random
 import os
 from dotenv import load_dotenv
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from tqdm import tqdm
 
 load_dotenv()
 
 from openai import OpenAI
 
 # OpenAI API 클라이언트 초기화
-# 환경변수에서 API 키를 가져오거나 직접 설정
-api_key = os.getenv("OPENAI_API_KEY")  # 또는 직접 입력: "your-api-key-here"
+api_key = os.getenv("OPENAI_API_KEY")
 client = OpenAI(api_key=api_key)
 
 # 1. 데이터 로드
 df = pd.read_csv("hana.csv")
 
-emotions = ["불만", "성급함", "사투리", ""]
-weights = [0.2, 0.2, 0.1, 0.5]
+# 감정 리스트 및 가중치
+emotions = ["불만", "성급함", "사투리", "수다"]
+weights = [0.3, 0.3, 0.2, 0.2]
 
-# 전체 행의 10%만 감정 기반 각색 대상으로 선정
+# 4글자 이상인 발화만 필터링
+valid_indices = df[df['customer_utterance'].apply(lambda x: len(str(x)) >= 4)].index.tolist()
+
+# 4글자 이상인 발화 중에서 정확히 9,688개 선택
 total_rows = len(df)
-sample_size = int(total_rows * 0.1)  # 10%
+valid_rows = len(valid_indices)
+sample_size = min(9688, valid_rows)
+sample_indices = set(random.sample(valid_indices, sample_size))
 
-# 랜덤하게 10% 행 선택
-sample_indices = random.sample(range(total_rows), sample_size)
-
-def assign_emotion(row):
-    # 선택된 10%에만 감정 배정, 나머지는 "일반"
-    if row.name in sample_indices:
-        return random.choices(emotions, weights=weights)[0]
-    else:
-        return "일반"
-
-df['emotion'] = df.apply(assign_emotion, axis=1)
-
+print(f"=" * 60)
 print(f"전체 행 수: {total_rows:,}")
-print(f"감정 각색 대상: {sample_size:,} (10%)")
-print(f"일반 처리: {total_rows - sample_size:,} (90%)")
-print(f"\n감정 분포:")
-print(df['emotion'].value_counts())
+print(f"4글자 이상 발화: {valid_rows:,}")
+print(f"감정 각색 대상: {sample_size:,}개 선별")
+print(f"=" * 60)
 
-# 2. LLM에게 보낼 프롬프트 생성 함수
-def make_rewrite_prompt(counselor_utterance_text, customer_utterance_text, emotion):
-    if emotion == "일반":
-        return None  # 일반은 변환 안 함
-    
+# 2. LLM 프롬프트 생성 함수
+def make_rewrite_prompt(counselor_utterance, customer_utterance, emotion):
     prompt = f"""
-    당신은 '드라마 대사 작가'입니다. 아래 대화에서 [고객]의 대사를 '{emotion}' 감정이 느껴지도록 실감 나게 각색해 주세요.
-    
-    [상황]
-    상담원: {counselor_utterance_text}
-    고객(원문): {customer_utterance_text}
-    
-    [요청사항]
-    1. 의미는 훼손하지 말 것.
-    2. '{emotion}'의 특징(반말, 사투리, 감탄사 등)을 극대화할 것.
-    3. 오직 [각색된 대사]만 출력할 것.
-    """
+당신은 '드라마 대사 작가'입니다. 아래 대화에서 [고객]의 대사를 '{emotion}' 감정이 느껴지도록 실감 나게 각색해 주세요.
+
+[상황]
+상담원: {counselor_utterance}
+고객(원문): {customer_utterance}
+
+[요청사항]
+1. 의미는 훼손하지 말 것.
+2. '{emotion}'의 특징(반말, 사투리, 감탄사 등)을 극대화할 것.
+3. 오직 [각색된 대사]만 출력할 것.
+"""
     return prompt
 
-# 3. OpenAI GPT API를 호출하여 텍스트 변환
-def rewrite_with_gpt(counselor_utterance_text, customer_utterance_text, emotion, model="gpt-4.1"):
-    """
-    OpenAI GPT 모델을 사용하여 고객 대사를 감정에 맞게 각색합니다.
-    
-    Args:
-        counselor_utterance_text: 상담원 대사
-        customer_utterance_text: 고객 원문 대사
-        emotion: 적용할 감정 ("불만/분노", "성급함", "사투리(노인)", "일반")
-        model: 사용할 GPT 모델 (기본값: "gpt-4o-mini")
-    
-    Returns:
-        각색된 고객 대사 또는 원문 (일반인 경우)
-    """
-    if emotion == "일반":
-        return customer_utterance_text  # 일반은 변환 안 함
-    
-    prompt = make_rewrite_prompt(counselor_utterance_text, customer_utterance_text, emotion)
+# 3. OpenAI GPT API 호출 (단일 행 처리)
+def process_single_row(idx, row, emotion, model="gpt-4o-mini"):
+    """단일 행을 GPT로 처리"""
+    prompt = make_rewrite_prompt(row['counselor_utterance'], row['customer_utterance'], emotion)
     
     try:
         response = client.chat.completions.create(
@@ -88,81 +66,125 @@ def rewrite_with_gpt(counselor_utterance_text, customer_utterance_text, emotion,
             temperature=0.7,
             max_tokens=500
         )
+        rewritten = response.choices[0].message.content.strip()
         
-        rewritten_text = response.choices[0].message.content.strip()
-        return rewritten_text
-    
+        return {
+            'idx': idx,
+            'counselor_utterance': row['counselor_utterance'],
+            'customer_utterance': row['customer_utterance'],
+            'emotion': emotion,
+            'customer_utterance_rewritten': rewritten
+        }
     except Exception as e:
-        print(f"API 호출 오류: {e}")
-        return customer_utterance_text  # 오류 발생 시 원문 반환
+        print(f"\nAPI 호출 오류 (인덱스 {idx}): {e}")
+        return {
+            'idx': idx,
+            'counselor_utterance': row['counselor_utterance'],
+            'customer_utterance': row['customer_utterance'],
+            'emotion': emotion,
+            'customer_utterance_rewritten': row['customer_utterance']
+        }
 
-# 4. 데이터프레임에 각색된 대사 추가 (체크포인트 포함)
-def process_dataframe(df, model="gpt-4o-mini", checkpoint_interval=50, output_file="hana_rewritten.csv"):
-    """
-    데이터프레임의 모든 행에 대해 GPT를 사용하여 대사를 각색합니다.
+# 4. 선별된 9,688개 행 병렬 처리
+def process_selected_rows_parallel(df, selected_indices, model="gpt-4o-mini", max_workers=20):
+    """선별된 행을 병렬로 GPT 처리"""
     
-    Args:
-        df: 처리할 데이터프레임
-        model: 사용할 GPT 모델
-        checkpoint_interval: 체크포인트 저장 간격 (기본값: 50)
-        output_file: 출력 파일명
+    indices_list = sorted(list(selected_indices))
+    total = len(indices_list)
     
-    Returns:
-        각색된 대사가 추가된 데이터프레임
-    """
-    # 결과를 저장할 컬럼 초기화 (컬럼이 없는 경우에만)
-    if 'customer_utterance_rewritten' not in df.columns:
-        df['customer_utterance_rewritten'] = ""
-    if 'rewrite_emotion' not in df.columns:
-        df['rewrite_emotion'] = ""
+    print(f"\n[1단계] 선별된 {total:,}개 행 GPT 병렬 처리 시작 (동시 작업: {max_workers}개)")
+    print("=" * 60)
     
-    total_rows = len(df)
-    count = 0
-    processed_count = 0
-    skipped_count = 0
+    # 각 행에 대한 작업 준비
+    tasks = []
+    for idx in indices_list:
+        row = df.loc[idx]
+        emotion = random.choices(emotions, weights=weights)[0]
+        tasks.append((idx, row, emotion))
     
-    for idx, row in df.iterrows():
-        count += 1
+    # 병렬 처리
+    results = []
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # 모든 작업 제출
+        futures = {executor.submit(process_single_row, idx, row, emotion, model): idx 
+                   for idx, row, emotion in tasks}
         
-        # 조건 1: 고객 발화가 4글자 미만이면 건너뛰기
-        if len(str(row['customer_utterance'])) < 4:
-            df.at[idx, 'customer_utterance_rewritten'] = row['customer_utterance']
-            df.at[idx, 'rewrite_emotion'] = "건너뜀(짧음)"
-            skipped_count += 1
-            continue
-        
-        # 조건 2: 이미 각색된 내용이 있으면 건너뛰기
-        if pd.notna(row.get('customer_utterance_rewritten')) and str(row.get('customer_utterance_rewritten')).strip() != "":
-            skipped_count += 1
-            continue
-        
-        # GPT로 각색
-        rewritten = rewrite_with_gpt(
-            row['counselor_utterance'], 
-            row['customer_utterance'], 
-            row['emotion'], 
-            model
-        )
-        
-        # 결과 저장
-        df.at[idx, 'customer_utterance_rewritten'] = rewritten
-        df.at[idx, 'rewrite_emotion'] = row['emotion']
-        processed_count += 1
-        
-        # 체크포인트: 50개마다 출력 및 저장
-        if count % checkpoint_interval == 0:
-            print(f"진행 상황: {count}/{total_rows} 완료 ({count/total_rows*100:.1f}%) | 처리: {processed_count}, 건너뜀: {skipped_count}")
-            df.to_csv(output_file, index=False, encoding='utf-8-sig')
-            print(f"  → 체크포인트 저장 완료: {output_file}")
+        # 진행 상황 표시와 함께 결과 수집
+        with tqdm(total=total, desc="GPT 처리 중", unit="행") as pbar:
+            for future in as_completed(futures):
+                result = future.result()
+                results.append(result)
+                pbar.update(1)
     
-    # 최종 저장
-    df.to_csv(output_file, index=False, encoding='utf-8-sig')
-    print(f"\n최종 완료: {count}/{total_rows} ({count/total_rows*100:.1f}%)")
+    print(f"완료: {total}/{total} (100.0%)")
+    print("=" * 60)
     
-    return df
+    # 결과를 DataFrame으로 변환
+    results_df = pd.DataFrame(results)
+    # idx 순서로 정렬
+    results_df = results_df.sort_values('idx').reset_index(drop=True)
+    # idx 컬럼 제거
+    results_df = results_df.drop('idx', axis=1)
+    
+    return results_df
 
-# 예시 실행
+# 5. 나머지 행 일괄 처리
+def process_remaining_rows(df, selected_indices):
+    """선별되지 않은 나머지 행은 '일반'으로 일괄 처리"""
+    
+    print(f"\n[2단계] 나머지 행 일괄 처리 시작")
+    print("=" * 60)
+    
+    results = {
+        'counselor_utterance': [],
+        'customer_utterance': [],
+        'emotion': [],
+        'customer_utterance_rewritten': []
+    }
+    
+    remaining_count = 0
+    for idx in df.index:
+        if idx not in selected_indices:
+            row = df.loc[idx]
+            results['counselor_utterance'].append(row['counselor_utterance'])
+            results['customer_utterance'].append(row['customer_utterance'])
+            results['emotion'].append('일반')
+            results['customer_utterance_rewritten'].append(row['customer_utterance'])
+            remaining_count += 1
+    
+    print(f"일괄 처리 완료: {remaining_count:,}개 행 ('일반' 감정, 원문 복사)")
+    print("=" * 60)
+    
+    return pd.DataFrame(results)
+
+# 실행
 if __name__ == "__main__":
-    print("\n전체 데이터 처리 중...")
-    df = process_dataframe(df, model="gpt-4o-mini")
-    print("처리 완료! 결과가 'hana_rewritten.csv'에 저장되었습니다.")
+    import time
+    start_time = time.time()
+    
+    # 1단계: 선별된 9,688개 행 병렬 GPT 처리
+    selected_df = process_selected_rows_parallel(df, sample_indices, model="gpt-4o-mini", max_workers=20)
+    
+    # 2단계: 나머지 행 일괄 처리
+    remaining_df = process_remaining_rows(df, sample_indices)
+    
+    # 3단계: 결합 및 저장
+    print(f"\n[3단계] 결과 결합 및 저장")
+    print("=" * 60)
+    
+    final_df = pd.concat([selected_df, remaining_df], ignore_index=True)
+    
+    # 4개 컬럼만 선택하여 저장
+    output_df = final_df[['counselor_utterance', 'customer_utterance', 'emotion', 'customer_utterance_rewritten']]
+    output_df.to_csv("hana_rewritten.csv", index=False, encoding='utf-8-sig')
+    
+    elapsed_time = time.time() - start_time
+    
+    print(f"최종 결과:")
+    print(f"  - 전체 행 수: {len(output_df):,}")
+    print(f"  - 컬럼: {list(output_df.columns)}")
+    print(f"  - 처리 시간: {elapsed_time:.1f}초 ({elapsed_time/60:.1f}분)")
+    print(f"\n감정 분포:")
+    print(output_df['emotion'].value_counts())
+    print("=" * 60)
+    print("\n✅ 처리 완료! 결과가 'hana_rewritten.csv'에 저장되었습니다.")
