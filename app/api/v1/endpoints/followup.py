@@ -4,7 +4,7 @@ from app.llm.follow_up.summarize_generator import get_summarize
 from app.llm.follow_up.personality_generator import get_personality, determine_personality
 from app.db.scripts.modules.connect_db import connect_db
 from app.db.scripts.modules.update_customer import get_personality_history, update_customer
-from app.utils.get_dialogue import get_dialogue
+from app.utils.get_dialogue import get_dialogue, refine_script
 from fastapi import APIRouter, HTTPException
 import time
 import asyncio
@@ -19,7 +19,7 @@ class SummaryRequest(BaseModel):
 async def create_summary(request: SummaryRequest):
     try:
         # redis에서 전문 가져오기
-        script = await get_dialogue(request.consultation_id)
+        script, json_script = await get_dialogue(request.consultation_id)
         print(f'전문 : {script}')
         
         start_parallel = time.time()
@@ -48,7 +48,8 @@ async def create_summary(request: SummaryRequest):
         return {
             "status": "success",
             "summary": summarize_result,
-            "evaluation": feedback
+            "evaluation": feedback,
+            "script": json_script
         }
 
     except Exception as e:
@@ -57,7 +58,7 @@ async def create_summary(request: SummaryRequest):
 
 class SaveConsultationRequest(BaseModel):
     customer_id: str      # 고객 ID
-    transcript: str       # 화자 분리된 전문
+    consultation_id: str  # 상담 ID
     summary: dict         # 수정된 요약본
     evaluation: dict      # 피드백/감정
 
@@ -67,12 +68,19 @@ async def save_consultation(data: SaveConsultationRequest):
     try:
         conn = connect_db()
         
+        # redis에서 전문 가져오기
+        script, _ = await get_dialogue(data.consultation_id)
+        print(f'전문 : {script}')
+        
+        customer_script = refine_script(script)
+        print(f'고객전문 : {customer_script}')
+        
         # DB에서 최근 성향 이력 3개 조회
         past_history = get_personality_history(conn, data.customer_id)
         print(past_history)
         
         # 현재 상담에서의 고객 성향 분석
-        current_personality = await get_personality(data.transcript)
+        current_personality = await get_personality(customer_script)
         
         # 최종 성향 확정 (과거 3개 + 현재 1개)
         total_history = (past_history + [current_personality])

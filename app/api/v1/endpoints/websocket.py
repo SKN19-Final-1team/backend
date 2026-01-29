@@ -47,14 +47,14 @@ async def websocket_endpoint(websocket: WebSocket):
             refined_text = text
             
             # --- RAG 실행 ---
-            result = await run_rag(
-                refined_text,
-                config=RAGConfig(top_k=4, normalize_keywords=True),
-                session_state=session_state,
-            )
+            # result = await run_rag(
+            #     refined_text,
+            #     config=RAGConfig(top_k=4, normalize_keywords=True),
+            #     session_state=session_state,
+            # )
             
-            if result:
-                await websocket.send_json({"type": "rag", "data": result})
+            # if result:
+            #     await websocket.send_json({"type": "rag", "data": result})
             
             # --- 실시간 화자분리 및 Redis 저장 ---
             asyncio.create_task(diarizer_manager.add_fragment(refined_text, DIAR_SYSTEM_PROMPT))
