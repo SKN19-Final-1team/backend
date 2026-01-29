@@ -28,6 +28,8 @@ filelock==3.20.3
 filetype==1.2.0
 flatbuffers==25.12.19
 flashtext==2.7
+jamo==0.4.1
+python-Levenshtein==0.25.1
 frozenlist==1.8.0
 fsspec==2025.12.0
 future==1.0.0
@@ -99,6 +101,7 @@ pyreadline3==3.5.4
 PySocks==1.7.1
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.1
+PyKomoran==0.1.6.post2
 python-multipart==0.0.21
 pytz==2025.2
 PyYAML==6.0.3
