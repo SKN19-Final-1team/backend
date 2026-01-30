@@ -455,6 +455,24 @@ TESTS: List[Dict[str, Any]] = [
 ]
 
 
+def split_test_sets(tests: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """
+    guide_test: 상담/가이드 문장 품질 검증용(card_usage 중심)
+    rag_test: 일반 RAG 검색/라우팅 검증용(card_info 및 기타)
+    """
+    guide_tests: List[Dict[str, Any]] = []
+    rag_tests: List[Dict[str, Any]] = []
+    for t in tests:
+        if t.get("expect_route") == "card_usage":
+            guide_tests.append(t)
+        else:
+            rag_tests.append(t)
+    return guide_tests, rag_tests
+
+
+GUIDE_TESTS, RAG_TESTS = split_test_sets(TESTS)
+
+
 # ----------------------------
 # Checker
 # ----------------------------
@@ -503,11 +521,15 @@ async def run_tests(
     top_k: int = 4,
     show_all: bool = False,
     show_answer: bool = True,
+    enable_consult_search: Optional[bool] = None,
 ):
     fails: List[str] = []
 
     for t in tests:
-        res = await run_rag(t["query"], config=RAGConfig(top_k=top_k))
+        cfg_kwargs = {"top_k": top_k}
+        if enable_consult_search is not None:
+            cfg_kwargs["enable_consult_search"] = enable_consult_search
+        res = await run_rag(t["query"], config=RAGConfig(**cfg_kwargs))
         chk = _check(t, res)
 
         if show_all or not chk["ok"]:
@@ -528,3 +550,32 @@ async def run_tests(
             fails.append(t["id"])
 
     print(f"done: {len(tests)} total, fail {len(fails)} -> {fails}")
+    return len(fails) == 0
+
+
+async def run_guide_tests(
+    top_k: int = 4,
+    show_all: bool = False,
+    show_answer: bool = True,
+):
+    return await run_tests(
+        GUIDE_TESTS,
+        top_k=top_k,
+        show_all=show_all,
+        show_answer=show_answer,
+        enable_consult_search=True,
+    )
+
+
+async def run_rag_tests(
+    top_k: int = 4,
+    show_all: bool = False,
+    show_answer: bool = True,
+):
+    return await run_tests(
+        RAG_TESTS,
+        top_k=top_k,
+        show_all=show_all,
+        show_answer=show_answer,
+        enable_consult_search=False,
+    )
