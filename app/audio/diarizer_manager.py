@@ -67,6 +67,8 @@ class DiarizationManager:
             self.global_items = merge_same_speaker(self.global_items)
             self.global_items = dedupe_near_duplicates(self.global_items, ratio=0.95)
             
+            # === 상준님 전체 보정 코드 추가 ===
+            
             await self.redis.set(
                 f"stt:{self.session_id}", 
                 json.dumps(self.global_items, ensure_ascii=False)
