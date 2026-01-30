@@ -342,16 +342,17 @@ async def retrieve_multi(
             fetch_ms = last_fetch_elapsed_ms
             break_hit = db_calls_limit_reached
             guide_quota = max(top_k * 2, top_k + 3)
-            print(
-                f"[retriever] source={source_label} fetch_ms={fetch_ms:.1f} cand_added={len(table_candidates)} "
-                f"total_cand={len(candidates)} break_hit={break_hit}"
-            )
+            # print(
+            #     f"[retriever] source={source_label} fetch_ms={fetch_ms:.1f} cand_added={len(table_candidates)} "
+            #     f"total_cand={len(candidates)} break_hit={break_hit}"
+            # )
             if LOG_RETRIEVER_DEBUG:
-                print(
-                    f"[retriever] source={source_label} rows={len(rows)} "
-                    f"table_candidates={len(table_candidates)} "
-                    f"guide_quota={guide_quota} guide_candidates={len(table_candidates)}"
-                )
+                pass
+                # print(
+                #     f"[retriever] source={source_label} rows={len(rows)} "
+                #     f"table_candidates={len(table_candidates)} "
+                #     f"guide_quota={guide_quota} guide_candidates={len(table_candidates)}"
+                # )
         else:
             # 기타 테이블: 일반 검색
             rows = _fetch_rows(safe_table)
@@ -359,13 +360,14 @@ async def retrieve_multi(
             candidates.extend(table_candidates)
             fetch_ms = last_fetch_elapsed_ms
             break_hit = db_calls_limit_reached
-            print(
-                f"[retriever] table={safe_table} fetch_ms={fetch_ms:.1f} cand_added={len(table_candidates)} "
-                f"total_cand={len(candidates)} break_hit={break_hit}"
-            )
+            # print(
+            #     f"[retriever] table={safe_table} fetch_ms={fetch_ms:.1f} cand_added={len(table_candidates)} "
+            #     f"total_cand={len(candidates)} break_hit={break_hit}"
+            # )
         
         if LOG_RETRIEVER_DEBUG and table_candidates:
-            print(f"[retriever] table={safe_table} rows={len(rows)} candidates={len(table_candidates)}")
+            pass
+            # print(f"[retriever] table={safe_table} rows={len(rows)} candidates={len(table_candidates)}")
 
     def _doc_key(doc: Dict[str, object]) -> str:
         title = doc.get("title")
@@ -402,10 +404,11 @@ async def retrieve_multi(
         docs = _finalize_candidates(diverse_docs, _doc_key, context)
     if LOG_RETRIEVER_DEBUG and docs:
         top = docs[0]
-        print(
-            "[retriever] "
-            f"top_title={top.get('title')} "
-            f"score={top.get('score')} rrf={top.get('rrf_score')} "
-            f"title_score={top.get('title_score')}"
-        )
+        pass
+        # print(
+        #     "[retriever] "
+        #     f"top_title={top.get('title')} "
+        #     f"score={top.get('score')} rrf={top.get('rrf_score')} "
+        #     f"title_score={top.get('title_score')}"
+        # )
     return docs[:top_k]

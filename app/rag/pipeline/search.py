@@ -114,12 +114,12 @@ async def run_search(
     if not should_search:
         if LOG_TIMING:
             total = time.perf_counter() - t_start
-            print(
-                "[rag] "
-                f"route={format_ms(t_route - t_start)} "
-                f"total={format_ms(total)} "
-                f"should_search=False route={routing.get('route')}"
-            )
+            # print(
+            #     "[rag] "
+            #     f"route={format_ms(t_route - t_start)} "
+            #     f"total={format_ms(total)} "
+            #     f"should_search=False route={routing.get('route')}"
+            # )
         return SearchResult(
             routing=routing,
             docs=[],

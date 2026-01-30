@@ -3,15 +3,6 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 import re
 
-# =========================================================
-# Simple, stable guidance script generator (3 lines)
-# - Query-first intent scoring
-# - Pick ONE best grounding sentence by anchor relevance
-# - No A/B "또는" questions (single question only)
-# - Strong noise filtering (promo/title/legal fragments)
-# - Phone numbers kept only if user asked for them
-# =========================================================
-
 MAX_DOCS = 3
 MAX_SNIPPET_CHARS = 420
 
@@ -196,10 +187,7 @@ def _is_bad_grounding(s: str) -> bool:
     return False
 
 def _score_anchor(query: str, doc_snips: List[Dict[str, str]], anchor_def: dict[str, Any]) -> int:
-    """
-    query hit: +10 per pattern
-    doc hit: +2 per keyword occurrence (light)
-    """
+
     score = 0
     q = query or ""
     blob = " ".join([q] + [f"{d.get('title','')} {d.get('snippet','')}" for d in doc_snips])
@@ -225,10 +213,7 @@ def _choose_anchor(query: str, doc_snips: List[Dict[str, str]]) -> dict[str, Any
     return best
 
 def _pick_grounding_sentence(doc_snips: List[Dict[str, str]], anchor_kw: List[str], allow_phone: bool) -> str:
-    """
-    Pick sentence with max keyword overlap.
-    If nothing decent, fall back to a safe title-based line.
-    """
+
     best_s = ""
     best_sc = -1
 

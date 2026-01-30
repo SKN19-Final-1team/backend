@@ -235,12 +235,12 @@ def build_where_clause(
     # 스코프 필터 (문서 소스별 제한)
     scope_filter = filters.get("_scope_filter")
     filter_keys = list(filters.keys())
-    logger.debug(
-        "build_where_clause table=%s scope_filter_present=%s filter_keys=%s",
-        table,
-        bool(scope_filter),
-        filter_keys,
-    )
+    # logger.debug(
+    #     "build_where_clause table=%s scope_filter_present=%s filter_keys=%s",
+    #     table,
+    #     bool(scope_filter),
+    #     filter_keys,
+    # )
     if scope_filter:
         if not _is_scope_filter_allowed(scope_filter):
             raise ValueError(f"Unsupported scope filter: {scope_filter}")
@@ -386,14 +386,14 @@ def vector_search(
                     f"FROM source{where_sql} ORDER BY embedding <=> %s LIMIT %s"
                 )
                 params = [emb, *where_params, emb, limit]
-                logger.debug("[vector_search] FINAL_SQL where_clause: %s", where_sql)
-                logger.debug("[vector_search] FINAL_PARAMS: %s", params)
+                # logger.debug("[vector_search] FINAL_SQL where_clause: %s", where_sql)
+                # logger.debug("[vector_search] FINAL_PARAMS: %s", params)
                 def _execute(sql_text: str, params_list: List[object]) -> List[tuple]:
                     exec_start = time.perf_counter()
                     cur.execute(_escape_pyformat_percent(sql_text), params_list)
                     exec_ms = (time.perf_counter() - exec_start) * 1000
                     rows = cur.fetchall()
-                    print(f"[retriever_db] table={table} mode=vector exec_ms={exec_ms:.1f} rows={len(rows)}")
+                    # print(f"[retriever_db] table={table} mode=vector exec_ms={exec_ms:.1f} rows={len(rows)}")
                     return rows
 
                 try:
@@ -692,21 +692,23 @@ def text_search(
                 if _EXPLAIN_ENABLED:
                     try:
                         explain_sql = cur.mogrify(f"EXPLAIN (ANALYZE, BUFFERS) {sql}", params)
-                        print(f"[retriever_db][EXPLAIN_SQL] {explain_sql.decode('utf-8')}")
+                        # print(f"[retriever_db][EXPLAIN_SQL] {explain_sql.decode('utf-8')}")
                         cur.execute(f"EXPLAIN (ANALYZE, BUFFERS) {sql}", params)
                         explain_result = cur.fetchall()
                         if explain_result:
-                            print("[retriever_db][EXPLAIN]", "\n".join(str(row[0]) for row in explain_result))
+                            pass
+                            # print("[retriever_db][EXPLAIN]", "\n".join(str(row[0]) for row in explain_result))
                         else:
-                            print("[retriever_db][EXPLAIN] (no result)")
+                            pass
+                            # print("[retriever_db][EXPLAIN] (no result)")
                     except Exception as exc:
-                        print(f"[retriever_db][EXPLAIN ERROR] {exc}")
+                        # print(f"[retriever_db][EXPLAIN ERROR] {exc}")
                         conn.rollback()
                 exec_start = time.perf_counter()
                 cur.execute(_escape_pyformat_percent(sql), params)
                 exec_ms = (time.perf_counter() - exec_start) * 1000
                 rows = cur.fetchall()
-                print(f"[retriever_db] table={table} mode=text submode={submode} exec_ms={exec_ms:.1f} rows={len(rows)}")
+                # print(f"[retriever_db] table={table} mode=text submode={submode} exec_ms={exec_ms:.1f} rows={len(rows)}")
                 return rows
 
             results: List[Tuple[object, str, Dict[str, object], float]] = []

@@ -109,13 +109,13 @@ def _log_cache_key(action: str, key: tuple, hit: Optional[str], doc_count: int) 
     model, llm_card_top_n, route, prompt_version, query_template, query, doc_ids = key
     template_preview = (query_template or "")[:60]
     query_preview = (query or "")[:60]
-    print(
-        "[rag][cache] cards "
-        f"{action} hit={hit or 'miss'} hash={digest} "
-        f"route={route} model={model} top_n={llm_card_top_n} "
-        f"prompt_ver={prompt_version} docs={doc_count} "
-        f"template={template_preview} query={query_preview}"
-    )
+    # print(
+    #     "[rag][cache] cards "
+    #     f"{action} hit={hit or 'miss'} hash={digest} "
+    #     f"route={route} model={model} top_n={llm_card_top_n} "
+    #     f"prompt_ver={prompt_version} docs={doc_count} "
+    #     f"template={template_preview} query={query_preview}"
+    # )
 
 
 async def card_cache_get(
@@ -139,10 +139,11 @@ async def card_cache_get(
                     cards = _cards_from_cache(cards_by_id, ordered_doc_ids)
                     if cards is not None:
                         _log_cache_key("get", key, "redis", len(ordered_doc_ids))
-                        print(f"[card_cache] hit=1 layer=redis key={_short_key(key)}")
+                        # print(f"[card_cache] hit=1 layer=redis key={_short_key(key)}")
                         return cards, guidance_script, "redis"
             except Exception as exc:
-                print("[rag] redis cache get failed:", repr(exc))
+                pass
+                # print("[rag] redis cache get failed:", repr(exc))
 
     now = time.time()
     _prune_card_cache(now)
@@ -160,7 +161,7 @@ async def card_cache_get(
         _log_cache_key("get", key, None, len(ordered_doc_ids))
         return None
     _log_cache_key("get", key, "mem", len(ordered_doc_ids))
-    print(f"[card_cache] hit=1 layer=mem key={_short_key(key)}")
+    # print(f"[card_cache] hit=1 layer=mem key={_short_key(key)}")
     return cards, guidance_script, "mem"
 
 
@@ -189,12 +190,13 @@ async def card_cache_set(
                 )
                 ttl = max(1, int(CARD_CACHE_TTL_SEC))
                 await client.setex(_cache_key_str(key), ttl, payload)
-                print(f"[card_cache] set layer=redis key={_short_key(key)} ttl={ttl}")
+                # print(f"[card_cache] set layer=redis key={_short_key(key)} ttl={ttl}")
             except Exception as exc:
-                print("[rag] redis cache set failed:", repr(exc))
+                pass
+                # print("[rag] redis cache set failed:", repr(exc))
 
     now = time.time()
     _prune_card_cache(now)
     _CARD_CACHE[key] = (now, copy.deepcopy(cards_by_id), guidance_script)
     _log_cache_key("set", key, "mem", len(cards))
-    print(f"[card_cache] set layer=mem key={_short_key(key)} ttl={int(CARD_CACHE_TTL_SEC)}")
+    # print(f"[card_cache] set layer=mem key={_short_key(key)} ttl={int(CARD_CACHE_TTL_SEC)}")
