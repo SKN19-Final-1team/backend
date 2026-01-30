@@ -1099,7 +1099,6 @@ def main():
     if args.pred_json:
         with open(args.pred_json, "r", encoding="utf-8") as f:
             pred_items = json.load(f)
-        print(f"✅ Loaded pred_json={args.pred_json} (utts={len(pred_items)})")
         api_logs = []
         tail_latency_parallel = None
         tail_latency_single = None
@@ -1131,12 +1130,6 @@ def main():
         step = batch_size
 
         assumed_call_duration = len(frags) * frag_interval
-
-        print(f"🧩 simulate_stt={args.simulate_stt} | index={args.index}")
-        print(f"🚀 model={args.model}")
-        print(f"⏱ batch_window={batch_window}s overlap={overlap}s frag_interval={frag_interval}s")
-        print(f"🧩 fragments={len(frags)} | batch_size(frags)={batch_size} overlap(frags)={overlap_size}")
-        print()
 
         api_logs = []
         global_items: List[Dict[str, str]] = []
@@ -1216,9 +1209,6 @@ def main():
                 "global_items_now": len(global_items),
             })
 
-            print(f"[batch#{batch_id:02d}] frags main={start}-{end-1} inc={inc_start}-{inc_end-1} "
-                  f"| api={api_sec:.3f}s | scheduled={scheduled_time:.1f}s")
-
             batch_id += 1
 
         total_wall = time.perf_counter() - t_wall0
@@ -1250,19 +1240,6 @@ def main():
 
     with open(out_logs, "w", encoding="utf-8") as f:
         json.dump(api_logs, f, ensure_ascii=False, indent=2)
-
-    print("\n========================================")
-    print("✅ DONE (FULLTEXT diarization + postprocess)")
-    print("========================================")
-    print(f"- outputs: {out_json}, {out_js}, {out_logs}")
-
-    if args.pred_json:
-        print("- timing: skipped (pred_json mode)")
-    else:
-        print(f"- assumed call duration (sec): {assumed_call_duration:.1f} ⚠️ (frag_interval 기반 가정)")
-        print(f"- total wall time to run script (sec): {total_wall:.3f} (오프라인 순차 실행)")
-        print(f"- simulated tail latency (parallel ideal) (sec): {tail_latency_parallel:.3f}")
-        print(f"- simulated tail latency (single-worker) (sec): {tail_latency_single:.3f}")
 
     # Evaluation
     if args.eval:
@@ -1300,26 +1277,6 @@ def main():
                 metrics["gt_chars"],
                 metrics["pred_chars"],
             ])
-
-        print("\n========================================")
-        print("📊 EVAL (GT vs PRED) — aligned char based")
-        print("========================================")
-        print(f"- acc(aligned chars): {metrics['acc_aligned_chars']:.4f}")
-        print(f"- coverage(aligned chars): {metrics['coverage_aligned_chars']:.4f}")
-        print(f"- confusion(labels=[agent,customer]): {metrics['confusion']['matrix']}")
-        print(f"- error_spans(saved): {len(metrics['error_spans'])} spans")
-        print(f"- eval outputs: {eval_json}, {eval_csv}")
-
-        # print top few spans for quick look
-        if metrics["error_spans"]:
-            print("\n--- Top error spans (snippets) ---")
-            for i, sp in enumerate(metrics["error_spans"][:5], 1):
-                print(f"[{i}] len={sp['span_len_chars']} "
-                      f"GT_major={sp['gt_major_speaker']} Pred_major={sp['pred_major_speaker']} "
-                      f"GT_utts={sp['gt_utt_range']} Pred_utts={sp['pred_utt_range']}")
-                print(f" GT: {sp['gt_snippet']}")
-                print(f" PR: {sp['pred_snippet']}")
-                print("")
 
 if __name__ == "__main__":
     main()
