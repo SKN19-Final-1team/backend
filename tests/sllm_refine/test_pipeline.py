@@ -16,7 +16,7 @@ current_file = Path(__file__).resolve()
 project_root = current_file.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from app.llm.delivery.deliverer import refine_text_pipeline
+from app.llm.delivery.deliverer import pipeline
 
 
 def print_header():
@@ -30,32 +30,23 @@ def print_header():
 
 def process_text(user_input: str, use_sllm: bool = True):
     """텍스트 처리 및 결과 출력"""
+    import json
+    import time
+    
     print(f"\n📝 입력: {user_input}")
     print("-" * 70)
     
-    # 파이프라인 실행
-    result = refine_text_pipeline(user_input, use_sllm=use_sllm)
+    # 파이프라인 실행 (시간 측정)
+    start_time = time.time()
+    result = pipeline(user_input, use_sllm=use_sllm)
+    elapsed_time = time.time() - start_time
     
-    # Step 2: 형태소 분석 - 카드상품명 후보만 출력
-    card_candidates = result['step2_morphology'].get('card_candidates', [])
-    print(f"\n[Step 2] 카드상품명 후보: {card_candidates if card_candidates else '(없음)'}")
+    # JSON 형식 출력
+    print("\n결과 (JSON):")
+    print(json.dumps(result, ensure_ascii=False, indent=2))
     
-    # Step 3: 단어 매칭 - Top 3 매칭 결과만 출력
-    matches = result['step3_matching'].get('matches', [])
-    print(f"\n[Step 3] 단어 매칭 (Top-3):")
-    if matches:
-        for i, (name, score) in enumerate(matches[:3], 1):
-            print(f"  {i}. {name:50} (유사도: {score:.3f})")
-    else:
-        print("  (매칭 결과 없음)")
-    
-    # Step 4: sLLM 최종 교정 - 최종 교정 텍스트만 출력
-    if use_sllm:
-        final_text = result['step4_refined']
-        print(f"\n[Step 4] 최종 교정: {final_text}")
-    else:
-        print(f"\n[Step 4] sLLM 사용 안 함")
-    
+    # 응답시간 출력
+    print(f"\n⏱️  응답시간: {elapsed_time:.2f}초 ({elapsed_time*1000:.0f}ms)")
     print("-" * 70)
 
 
@@ -67,7 +58,7 @@ def main():
     print("시스템 초기화 중...")
     try:
         # 더미 호출로 모듈 로드
-        refine_text_pipeline("초기화", use_sllm=False)
+        pipeline("초기화", use_sllm=False)
         print("✓ 초기화 완료\n")
     except Exception as e:
         print(f"⚠️  초기화 경고: {e}\n")
@@ -90,7 +81,6 @@ def main():
             process_text(user_input, use_sllm=True)
             
         except KeyboardInterrupt:
-            print("\n\n프로그램을 종료합니다.")
             break
         except Exception as e:
             print(f"\n[ERROR] 오류 발생: {e}")

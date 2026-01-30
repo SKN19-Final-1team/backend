@@ -214,35 +214,24 @@ def pipeline(text: str, use_sllm: bool = True) -> Dict[str, any]:
     if use_sllm:
         refine_result = refine_with_sllm(corrected_text, context=morphology_result)
         final_text = refine_result["text"]
-        keywords = refine_result.get("keywords", [])
     else:
         final_text = corrected_text
-        keywords = []
+    
+    # JSON 형식으로 반환
+    card_candidates = morphology_result.get("card_candidates", [])
+    matches = matching_result.get("matches", [])
     
     return {
-        "original": original_text,
-        "step2_morphology": morphology_result,
-        "step3_matching": matching_result,
-        "step3_corrected": corrected_text,
-        "step4_refined": final_text,
-        "keywords": keywords
+        "candidate": card_candidates[0] if card_candidates else "",
+        "matched": matches,
+        "refined": final_text
     }
 
 
 def refine_text(text: str) -> Dict[str, any]:
     result = pipeline(text, use_sllm=True)
-    return {
-        "text": result["step4_refined"],
-        "keywords": result["keywords"]
-    }
+    return result  # 이미 JSON 형식
 
 
 def deliver(text: str) -> Dict[str, any]:
-    refine_result = refine_text(text)
-    refined_text = refine_result["text"]
-    
-    return {
-        "original": text,
-        "refined": refined_text,
-        "keywords": refine_result.get("keywords", [])
-    }
+    return pipeline(text, use_sllm=True)
