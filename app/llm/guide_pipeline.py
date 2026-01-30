@@ -212,7 +212,7 @@ async def build_guidance_response(
                 }
                 for doc in guidance_docs
             ]
-            print(f"[guide_docs] selected={selected}")
+            # print(f"[guide_docs] selected={selected}")
     guide_script_message = ""
 
     if route_name == "card_info":
@@ -254,12 +254,14 @@ async def build_guidance_response(
                 model=config.model,
             )
             if not guidance_script:
-                print("[guide_fallback] reason=llm_empty")
+                pass
+                # print("[guide_fallback] reason=llm_empty")
         elif enable_guidance and not guidance_docs:
             if not raw_guide_docs:
-                print("[guide_fallback] reason=no_docs_raw")
+                pass
+                # print("[guide_fallback] reason=no_docs_raw")
             else:
-                print(f"[guide_fallback] reason=no_docs_after_filter raw={len(raw_guide_docs)} filtered=0")
+                # print(f"[guide_fallback] reason=no_docs_after_filter raw={len(raw_guide_docs)} filtered=0")
                 # Relax filter: keep top docs by score to avoid empty guidance
                 guidance_docs = sorted(
                     raw_guide_docs,
@@ -275,7 +277,7 @@ async def build_guidance_response(
                         }
                         for doc in guidance_docs
                     ]
-                    print(f"[guide_docs] relaxed_selected={selected}")
+                    # print(f"[guide_docs] relaxed_selected={selected}")
         if enable_guidance and not guidance_script:
             guidance_script = (
                 "정확한 안내를 위해 상황을 조금 더 구체적으로 알려주세요.\n"

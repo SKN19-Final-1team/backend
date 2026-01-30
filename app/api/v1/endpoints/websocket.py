@@ -47,14 +47,14 @@ async def websocket_endpoint(websocket: WebSocket):
                 await diarizer_manager.add_fragment(text, DIAR_SYSTEM_PROMPT)
             
             # --- RAG 실행 ---
-            # result = await run_rag(
-            #     final_text,
-            #     config=RAGConfig(top_k=4, normalize_keywords=True),
-            #     session_state=session_state,
-            # )
+            result = await run_rag(
+                text,
+                config=RAGConfig(top_k=4, normalize_keywords=True),
+                session_state=session_state,
+            )
             
-            # if result:
-            #     await websocket.send_json({"type": "rag", "data": result})
+            if result:
+                await websocket.send_json({"type": "rag", "data": result})
 
         except Exception as e:
             print(f"[{session_id}] 처리 중 에러 : {e}")

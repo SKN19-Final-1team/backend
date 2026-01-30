@@ -119,10 +119,10 @@ async def retrieve_docs_card_info(
     if log_scores:
         top1 = docs[0].get("score") if docs else None
         top2 = docs[1].get("score") if len(docs) > 1 else None
-        print(
-            "[retriever_score] "
-            f"mode=lex submode=trgm top1={top1} top2={top2} score_type=trgm"
-        )
+        # print(
+        #     "[retriever_score] "
+        #     f"mode=lex submode=trgm top1={top1} top2={top2} score_type=trgm"
+        # )
     if not _card_info_should_stop_lex(docs) and _card_info_should_vector(docs):
         if budget_ms is not None and start_ts is not None:
             elapsed_ms = (time.perf_counter() - start_ts) * 1000
@@ -471,9 +471,9 @@ async def retrieve_docs(
     filtered_docs = retrieved_docs
     total_docs = len(filtered_docs)
     elapsed_ms = (time.perf_counter() - start) * 1000
-    print(
-        f"[pipeline_retrieve] retrieve_ms={elapsed_ms:.1f} doc_count={total_docs} route={route_name}"
-    )
+    # print(
+    #     f"[pipeline_retrieve] retrieve_ms={elapsed_ms:.1f} doc_count={total_docs} route={route_name}"
+    # )
     return filtered_docs
 
 
@@ -498,5 +498,5 @@ async def retrieve_consult_cases(
             top_k=top_k,
         )
     except Exception as exc:
-        print(f"[pipeline_retrieve][consult] error={exc}")
+        # print(f"[pipeline_retrieve][consult] error={exc}")
         return []

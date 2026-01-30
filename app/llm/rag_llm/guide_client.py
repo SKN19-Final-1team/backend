@@ -34,7 +34,7 @@ def generate_guide_text(
         "top_p": 0.9,
         "stream": False,
     }
-    print(f"[Guide LLM] model={RUNPOD_GUIDE_MODEL_NAME} url={RUNPOD_API_URL}")
+    # print(f"[Guide LLM] model={RUNPOD_GUIDE_MODEL_NAME} url={RUNPOD_API_URL}")
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {RUNPOD_API_KEY}",
@@ -43,19 +43,19 @@ def generate_guide_text(
     try:
         response = _session.post(RUNPOD_API_URL, json=payload, headers=headers, timeout=30)
         if response.status_code != 200:
-            print(f"[Guide LLM] API 오류 ({response.status_code}): {response.text}")
+            # print(f"[Guide LLM] API 오류 ({response.status_code}): {response.text}")
             return ""
         result = response.json()
         output = result["choices"][0]["message"]["content"].strip()
         return output
     except requests.exceptions.RequestException as e:
-        print(f"[Guide LLM] 네트워크 오류 발생: {e}")
+        # print(f"[Guide LLM] 네트워크 오류 발생: {e}")
         return ""
     except (KeyError, IndexError) as e:
-        print(f"[Guide LLM] 응답 구조 오류: {e}")
+        # print(f"[Guide LLM] 응답 구조 오류: {e}")
         return ""
     except Exception as e:
-        print(f"[Guide LLM] 알 수 없는 오류: {e}")
+        # print(f"[Guide LLM] 알 수 없는 오류: {e}")
         import traceback
-        traceback.print_exc()
+        # traceback.print_exc()
         return ""

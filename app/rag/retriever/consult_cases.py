@@ -120,12 +120,12 @@ def search_consultation_documents(
                 cur.execute(_escape_pyformat_percent(sql), params)
                 rows = cur.fetchall()
     exec_ms = (time.perf_counter() - start) * 1000
-    logger.info(
-        "[consult_retriever] vector+text exec_ms=%.1f rows=%d categories=%d",
-        exec_ms,
-        len(rows),
-        len(categories),
-    )
+    # logger.info(
+    #     "[consult_retriever] vector+text exec_ms=%.1f rows=%d categories=%d",
+    #     exec_ms,
+    #     len(rows),
+    #     len(categories),
+    # )
 
     docs: List[Dict[str, Any]] = []
     for (

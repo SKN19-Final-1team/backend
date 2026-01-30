@@ -349,7 +349,7 @@ def generate_detail_cards(
         if total_hits or cache_miss:
             hit_label = ",".join(f"{k}:{v}" for k, v in cache_hits.items() if v)
             hit_label = hit_label or "0"
-            print(f"[cards] doc_summary_cache hit({hit_label}) miss={cache_miss}")
+            # print(f"[cards] doc_summary_cache hit({hit_label}) miss={cache_miss}")
 
     prompt = _build_card_prompt(query, docs_for_llm)
     # 로깅: LLM 입력 길이/문서별 길이
@@ -362,10 +362,10 @@ def generate_detail_cards(
         doc_ids.append(doc_id)
         doc_chars.append(len(snippet))
         ctx_total += len(snippet)
-    print(
-        f"[cards] llm_input_chars={len(prompt)} ctx_chars={ctx_total} "
-        f"doc_ids={doc_ids} doc_chars={doc_chars}"
-    )
+    # print(
+    #     f"[cards] llm_input_chars={len(prompt)} ctx_chars={ctx_total} "
+    #     f"doc_ids={doc_ids} doc_chars={doc_chars}"
+    # )
     client = get_openai_client()
     messages = [
         {
@@ -388,7 +388,7 @@ def generate_detail_cards(
     except Exception as exc:
         # 단 1회만 재시도, 실패 시 fallback
         if _is_response_format_error(exc) or _is_transient_error(exc):
-            print("[cards] LLM error, fallback once:", repr(exc))
+            # print("[cards] LLM error, fallback once:", repr(exc))
             try:
                 resp = client.chat.completions.create(
                     model=model,
@@ -397,7 +397,7 @@ def generate_detail_cards(
                     max_tokens=350,
                 )
             except Exception as exc2:
-                print("[cards] LLM fallback failed:", repr(exc2))
+                # print("[cards] LLM fallback failed:", repr(exc2))
                 return base_cards, ""
         else:
             raise

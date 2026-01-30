@@ -90,12 +90,12 @@ def _log_cache_key(action: str, key: tuple, hit: Optional[str]) -> None:
     )
     query_preview = (normalized_query or "")[:80]
     filters_preview = filters_str[:200]
-    print(
-        "[rag][cache] retrieve "
-        f"{action} hit={hit or 'miss'} hash={digest} "
-        f"route={route} db_route={db_route} top_k={top_k} "
-        f"query={query_preview} filters={filters_preview}"
-    )
+    # print(
+    #     "[rag][cache] retrieve "
+    #     f"{action} hit={hit or 'miss'} hash={digest} "
+    #     f"route={route} db_route={db_route} top_k={top_k} "
+    #     f"query={query_preview} filters={filters_preview}"
+    # )
 
 
 async def retrieval_cache_get(
@@ -116,7 +116,8 @@ async def retrieval_cache_get(
                         _log_cache_key("get", key, "redis")
                         return entries, "redis"
             except Exception as exc:
-                print("[rag] redis retrieval cache get failed:", repr(exc))
+                pass
+                # print("[rag] redis retrieval cache get failed:", repr(exc))
 
     now = time.time()
     _prune_cache(now)
@@ -148,7 +149,8 @@ async def retrieval_cache_set(
                 ttl = max(1, int(RETRIEVE_CACHE_TTL_SEC))
                 await client.setex(_cache_key_str(key), ttl, payload)
             except Exception as exc:
-                print("[rag] redis retrieval cache set failed:", repr(exc))
+                pass
+                # print("[rag] redis retrieval cache set failed:", repr(exc))
 
     now = time.time()
     _prune_cache(now)
