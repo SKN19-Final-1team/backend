@@ -1,4 +1,6 @@
-from app.rag.pipeline.pipeline import RAGConfig, run_rag, route
+from app.rag.pipeline.config import RAGConfig
+from app.rag.pipeline.pipeline import run_rag
+from app.rag.pipeline.search import route
 from app.rag.pipeline.retrieve import retrieve_docs
 from app.rag.pipeline.utils import (
     apply_session_context,

@@ -216,6 +216,7 @@ def should_search_consult_cases(
     query: str,
     routing: Dict[str, Any],
     session_state: Optional[Dict[str, Any]],
+    commit: bool = True,
 ) -> bool:
     base_flag = bool(routing.get("need_consult_case_search"))
 
@@ -248,7 +249,7 @@ def should_search_consult_cases(
     if not (base_flag or keyword_trigger or intent_trigger or turn_trigger):
         return False
 
-    if session_state is not None:
+    if commit and session_state is not None:
         session_state["consult_last_search_at"] = now
         session_state["consult_last_query"] = query
     return True

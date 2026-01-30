@@ -290,8 +290,10 @@ def generate_detail_cards(
         if doc_id not in PIN_IDS:
             all_pin_docs = False
             break
-    if all_pin_docs and PIN_IDS:
-        return base_cards, ""
+    cache_hits = {"redis": 0, "mem": 0}
+    cache_miss = 0
+    cached_doc_ids = set()
+
     # 최적화: LLM 입력을 2개 문서로 제한
     max_llm_cards = max_llm_cards or 2
     llm_count = len(docs) if max_llm_cards is None else max(0, min(max_llm_cards, len(docs)))
@@ -304,9 +306,6 @@ def generate_detail_cards(
         if doc_id:
             doc_id_to_index[doc_id] = idx
 
-    cache_hits = {"redis": 0, "mem": 0}
-    cache_miss = 0
-    cached_doc_ids = set()
     if DOC_SUMMARY_CACHE_ENABLED:
         for doc in docs:
             doc_id = str((doc.get("metadata") or {}).get("id") or doc.get("id") or "")
@@ -318,6 +317,7 @@ def generate_detail_cards(
                 idx = doc_id_to_index.get(doc_id)
                 if idx is not None and summary:
                     base_cards[idx]["content"] = summary
+                    base_cards[idx]["detailContent"] = summary
                     cached_doc_ids.add(doc_id)
                     cache_hits[backend] = cache_hits.get(backend, 0) + 1
             else:
@@ -328,7 +328,10 @@ def generate_detail_cards(
         if doc_id in cached_doc_ids:
             continue
         base_cards[idx]["content"] = _build_rule_summary(query, doc.get("content") or "")
+        base_cards[idx]["detailContent"] = base_cards[idx]["content"]
 
+    if all_pin_docs and PIN_IDS:
+        return base_cards, ""
 
     docs_for_llm: List[Dict[str, Any]] = []
     doc_ids_for_llm: List[str] = []
@@ -417,7 +420,7 @@ def generate_detail_cards(
         merged = {**base, **generated}
         merged["id"] = base["id"]
         merged["title"] = base["title"]
-        merged["detailContent"] = base["detailContent"]
+        merged["detailContent"] = merged["content"]
         merged["relevanceScore"] = base["relevanceScore"]
         merged["content"] = _sanitize_card_content(str(merged.get("content") or ""))
         out[card_index] = merged
