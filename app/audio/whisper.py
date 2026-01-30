@@ -2,6 +2,7 @@ import threading
 import queue
 import io
 import asyncio
+import time
 from openai import OpenAI
 from dotenv import load_dotenv
 
@@ -42,7 +43,7 @@ class WhisperService:
 
         HALLUCINATION_KEYWORDS = [
             "시청해주셔서", "시청해 주셔서", "구독과 좋아요", 
-            "재택 플러스", "MBC", "뉴스", "투데이", "먹방", "영상편집", "영상", "편집", "진심으로"
+            "재택 플러스", "MBC", "뉴스", "투데이", "먹방", "영상편집", "영상", "편집", "진심으로", "예쁘다"
         ]
         
         while self.running:
@@ -50,7 +51,9 @@ class WhisperService:
                 audio_data = self.queue.get()
                 if audio_data is None: 
                     break
-
+                
+                stt_start = time.perf_counter()
+                
                 # 오디오 처리
                 audio_file = io.BytesIO(audio_data)
                 audio_file.name = "audio.wav"
@@ -60,9 +63,16 @@ class WhisperService:
                     model="whisper-1",
                     file=audio_file,
                     language="ko",
+                    prompt="""한국 신용카드 고객센터 통화 녹취록입니다.
+                    발화된 내용만 원문 그대로 출력하세요. 침묵은 무시하세요.
+                    추가, 바꿔쓰기, 요약, 수정은 일절 금지합니다.
+                    머뭇거림이나 반복되는 부분은 그대로 유지하세요."""
                 )
                 text = transcript.text.strip()
-
+                
+                stt_end = time.perf_counter()
+                print(f"[Latency] Whisper STT: {(stt_end - stt_start):.3f}s")
+                
                 # 할루시네이션 방지
                 if not text:
                     self.queue.task_done()

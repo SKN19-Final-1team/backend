@@ -46,10 +46,12 @@ async def create_summary(request: SummaryRequest):
         print(f"병렬 처리 시간(요약+피드백): {parallel_time:.2f}초")
 
         return {
-            "status": "success",
+            "isSuccess": True,
+            "code": 200,
+            "message": "후처리 문서가 생성되었습니다.",
             "summary": summarize_result,
             "evaluation": feedback,
-            "script": json_script
+            "script": json_script,
         }
 
     except Exception as e:
@@ -59,6 +61,7 @@ async def create_summary(request: SummaryRequest):
 class SaveConsultationRequest(BaseModel):
     customer_id: str      # 고객 ID
     consultation_id: str  # 상담 ID
+    fcr: int              # 수정할 fcr
     summary: dict         # 수정된 요약본
     evaluation: dict      # 피드백/감정
 
@@ -89,16 +92,15 @@ async def save_consultation(data: SaveConsultationRequest):
         
         # 고객 정보 업데이트
         print(f"최종 성향: {current_type_code}, 최종 히스토리: {type_history}")
-        update_customer(conn, data.customer_id, current_type_code, type_history)
+        update_customer(conn, data.customer_id, current_type_code, type_history, data.fcr)
         
         # 상담 내역 저장 코드 추가하기
         
         conn.close()
 
         return {
-            "status": "success",
-            "current_personality": current_personality,
-            "final_personality": type_history,
+            "isSuccess": True,
+            "code": 200,
             "message": "상담 내역 및 고객 성향이 저장되었습니다."
         }
     except Exception as e:

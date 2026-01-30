@@ -40,7 +40,7 @@ async def get_dialogue(session_id: str):
 
 def refine_script(script):
     noise_patterns = [
-        "안녕하세요?", "예.", "네.", "알겠습니다.", "수고하십니다.", "감사합니다."
+        "안녕하세요", "예", "네", "알겠습니다", "수고하십니다", "감사합니다"
     ]
     
     lines = script.split('\n')

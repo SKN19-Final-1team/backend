@@ -25,7 +25,7 @@ def get_personality_history(conn, customer_id: str):
         return []
       
 
-def update_customer(conn, customer_id: str, current_type_code: str, type_history):
+def update_customer(conn, customer_id: str, current_type_code: str, type_history, fcr):
     """
     기존 고객의 성향 정보 업데이트
     """
@@ -36,11 +36,14 @@ def update_customer(conn, customer_id: str, current_type_code: str, type_history
                 SET 
                     type_history = %s, 
                     current_type_code = %s, 
-                    updated_at = CURRENT_TIMESTAMP
+                    updated_at = CURRENT_TIMESTAMP,
+                    last_consultation_date = CURRENT_DATE,
+                    total_consultations = total_consultations + 1,
+                    resolved_first_call = %s
                 WHERE id = %s;
             """
             
-            cur.execute(update_query, (json.dumps(type_history), current_type_code, customer_id))
+            cur.execute(update_query, (json.dumps(type_history), current_type_code, fcr, customer_id))
             
             conn.commit()
             
