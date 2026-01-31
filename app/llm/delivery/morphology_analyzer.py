@@ -248,19 +248,23 @@ def analyze_morphemes(text: str) -> List[Tuple[str, str]]:
     if kiwi is None:
         return [(text, "UNKNOWN")]
     
+
     try:
-        # 띄어쓰기 교정 (선택적)
+        # Step 1: 텍스트 레벨 교정 (correction_map 적용)
+        corrected_text = apply_text_corrections(text)
+        
+        # Step 2: 띄어쓰기 교정 (선택적)
         spacing = get_spacing()
-        processed_text = text
+        processed_text = corrected_text
         
         if spacing:
             try:
-                processed_text = spacing(text)
+                processed_text = spacing(corrected_text)
             except Exception as e:
                 print(f"[MorphologyAnalyzer] 띄어쓰기 교정 실패: {e}")
-                processed_text = text
+                processed_text = corrected_text
         
-        # 형태소 분석
+        # Step 3: 형태소 분석
         tokens = kiwi.tokenize(processed_text)
         
         # (형태소, 품사) 튜플로 변환
@@ -271,6 +275,84 @@ def analyze_morphemes(text: str) -> List[Tuple[str, str]]:
     except Exception as e:
         print(f"[MorphologyAnalyzer] 분석 오류: {e}")
         return [(text, "UNKNOWN")]
+
+
+# 글로벌 캐시: correction_map
+_correction_map_cache = None
+
+
+def get_correction_map() -> dict:
+    """
+    keywords_dict_refine.json에서 correction_map 로드 (캐시됨)
+    
+    Returns:
+        {오류형태: 교정형태} 딕셔너리
+    """
+    global _correction_map_cache
+    
+    if _correction_map_cache is not None:
+        return _correction_map_cache
+    
+    import json
+    import os
+    
+    try:
+        json_path = os.path.join(
+            os.path.dirname(__file__),
+            '..', '..', 'rag', 'vocab', 'keywords_dict_refine.json'
+        )
+        json_path = os.path.normpath(json_path)
+        
+        if os.path.exists(json_path):
+            with open(json_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            _correction_map_cache = data.get("correction_map", {})
+        else:
+            _correction_map_cache = {}
+            
+    except Exception as e:
+        print(f"[MorphologyAnalyzer] correction_map 로드 실패: {e}")
+        _correction_map_cache = {}
+    
+    return _correction_map_cache
+
+
+def apply_text_corrections(text: str) -> str:
+    """
+    텍스트 레벨에서 STT 오류 교정 적용
+    
+    correction_map의 오류 패턴을 교정된 형태로 치환
+    
+    Args:
+        text: 입력 텍스트
+        
+    Returns:
+        교정된 텍스트
+        
+    Example:
+        >>> apply_text_corrections("하나낸 계좌에서 연예비 납부")
+        "하나은행 계좌에서 연회비 납부"
+    """
+    correction_map = get_correction_map()
+    
+    if not correction_map:
+        return text
+    
+    result = text
+    
+    # 긴 패턴부터 먼저 교정 (겹침 방지)
+    sorted_patterns = sorted(correction_map.items(), key=lambda x: len(x[0]), reverse=True)
+    
+    for error_form, correct_form in sorted_patterns:
+        # 같은 단어면 스킵
+        if error_form == correct_form:
+            continue
+        
+        # 텍스트에 오류 패턴이 있으면 교정
+        if error_form in result:
+            result = result.replace(error_form, correct_form)
+    
+    return result
 
 
 def extract_nouns(text: str) -> List[str]:

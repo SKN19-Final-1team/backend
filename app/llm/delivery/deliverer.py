@@ -185,9 +185,10 @@ def pipeline(text: str, use_sllm: bool = True) -> Dict[str, any]:
     
     전체 흐름:
     1. STT 전사 (입력)
-    2. 형태소 분석 (Targeting)
-    3. 단어 매칭 및 교정 (Vocabulary Matching)
-    4. 최종 문장 생성 (sLLM Refining)
+    2. 텍스트 레벨 교정 (correction_map - keywords_dict_refine.json)
+    3. 형태소 분석 (Kiwipiepy)
+    4. 단어 매칭 및 교정 (카드상품명 등)
+    5. 최종 문장 생성 (sLLM - 문맥 기반 교정)
     
     Args:
         text: STT로부터 받은 원본 텍스트
@@ -196,24 +197,29 @@ def pipeline(text: str, use_sllm: bool = True) -> Dict[str, any]:
     Returns:
         {
             "original": 원본 텍스트,
+            "step1_corrected": correction_map 적용 후 텍스트,
             "step2_morphology": 형태소 분석 결과,
             "step3_matching": 단어 매칭 결과,
-            "step3_corrected": 단어 교정 적용 텍스트,
-            "step4_refined": sLLM 최종 교정 텍스트,
+            "refined": 최종 교정 텍스트,
             "keywords": 추출된 키워드
         }
     """
+    from app.llm.delivery.morphology_analyzer import apply_text_corrections
+    
     # 1. 입력 (STT 전사)
     original_text = text
     
-    # 2. 형태소 분석
-    morphology_result = analyze_and_extract(text)
+    # 2. 텍스트 레벨 교정 (correction_map)
+    step1_corrected = apply_text_corrections(text)
     
-    # 3. 단어 매칭 및 교정
-    matching_result = match_and_correct(text, morphology_result.get("card_candidates", []))
-    corrected_text = apply_corrections(text, matching_result.get("corrections", {}))
+    # 3. 형태소 분석
+    morphology_result = analyze_and_extract(step1_corrected)
     
-    # 4. 최종 문장 생성
+    # 4. 단어 매칭 및 교정
+    matching_result = match_and_correct(step1_corrected, morphology_result.get("card_candidates", []))
+    corrected_text = apply_corrections(step1_corrected, matching_result.get("corrections", {}))
+    
+    # 5. sLLM 최종 교정 (문맥 기반)
     if use_sllm:
         refine_result = refine_with_sllm(corrected_text, context=morphology_result)
         final_text = refine_result["text"]
@@ -224,10 +230,10 @@ def pipeline(text: str, use_sllm: bool = True) -> Dict[str, any]:
     
     return {
         "original": original_text,
+        "step1_corrected": step1_corrected,
         "step2_morphology": morphology_result,
         "step3_matching": matching_result,
-        "step3_corrected": corrected_text,
-        "step4_refined": final_text,
+        "refined": final_text,
         "keywords": keywords
     }
 
