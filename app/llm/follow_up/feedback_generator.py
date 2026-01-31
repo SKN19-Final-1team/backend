@@ -2,7 +2,6 @@ import json
 from openai import AsyncOpenAI
 from dotenv import load_dotenv
 import os
-from app.core.prompt import FEEDBACK_SYSTEM_PROMPT
 
 load_dotenv()
 
@@ -10,12 +9,12 @@ client = AsyncOpenAI(
     api_key=os.getenv("OPENAI_API_KEY")
 )
 
-async def generate_feedback(script, model_name="gpt-4.1-mini"):
+async def generate_feedback(script, system_prompt):
     try:
         response = await client.chat.completions.create(
-            model=model_name,
+            model="gpt-4.1-mini",
             messages=[
-                {"role": "system", "content": FEEDBACK_SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": f"상담 스크립트:\n{script}"}
             ],
             temperature=0,
@@ -28,4 +27,4 @@ async def generate_feedback(script, model_name="gpt-4.1-mini"):
         return result_json
 
     except Exception as e:
-        return f"{model_name} 호출 중 오류 발생 : {e}"
+        return f"호출 중 오류 발생 : {e}"
