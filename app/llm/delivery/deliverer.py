@@ -230,6 +230,18 @@ def pipeline(text: str, use_sllm: bool = True) -> Dict[str, any]:
 
 
 def refine_text(text: str) -> Dict[str, any]:
+    """
+    텍스트 교정 (파이프라인 래퍼)
+    
+    Args:
+        text: 교정할 텍스트
+    
+    Returns:
+        {
+            "text": 교정된 텍스트,
+            "keywords": 추출된 키워드
+        }
+    """
     result = pipeline(text, use_sllm=True)
     return {
         "text": result["step4_refined"],
@@ -238,6 +250,19 @@ def refine_text(text: str) -> Dict[str, any]:
 
 
 def deliver(text: str) -> Dict[str, any]:
+    """
+    텍스트 교정 및 전달 (레거시 호환)
+    
+    Args:
+        text: 교정할 텍스트
+    
+    Returns:
+        {
+            "original": 원본 텍스트,
+            "refined": 교정된 텍스트,
+            "keywords": 추출된 키워드
+        }
+    """
     refine_result = refine_text(text)
     refined_text = refine_result["text"]
     
@@ -246,3 +271,157 @@ def deliver(text: str) -> Dict[str, any]:
         "refined": refined_text,
         "keywords": refine_result.get("keywords", [])
     }
+
+
+def refine_conversation_text(text: str, use_sllm: bool = True) -> Dict[str, any]:
+    """
+    긴 대화 텍스트를 교정합니다.
+    
+    상담사와 고객의 발화가 구분 없이 이어붙어진 텍스트를 입력받아
+    컨텍스트 인식 교정을 수행합니다.
+    
+    Args:
+        text: 상담사와 고객의 발화가 이어붙어진 텍스트
+        use_sllm: sLLM 교정 사용 여부 (기본값: True)
+    
+    Returns:
+        {
+            "original": 원본 텍스트,
+            "refined": 최종 교정된 텍스트,
+            "step2_morphology": 형태소 분석 결과,
+            "step3_matching": 단어 매칭 결과,
+            "step3_corrected": 단어 교정 적용 텍스트,
+            "keywords": 추출된 키워드
+        }
+    
+    Example:
+        >>> text = "상담원 안수희입니다 나라사람카드 바우처 때문에"
+        >>> result = refine_conversation_text(text)
+        >>> print(result["refined"])
+        "상담원 안수이입니다 나라사랑카드 바우처 때문에"
+    """
+    if not text or not text.strip():
+        return {
+            "original": text,
+            "refined": text,
+            "step2_morphology": {},
+            "step3_matching": {},
+            "step3_corrected": text,
+            "keywords": []
+        }
+    
+    # 파이프라인 실행
+    result = pipeline(text, use_sllm=use_sllm)
+    
+    return {
+        "original": result["original"],
+        "refined": result["step4_refined"],
+        "step2_morphology": result["step2_morphology"],
+        "step3_matching": result["step3_matching"],
+        "step3_corrected": result["step3_corrected"],
+        "keywords": result.get("keywords", [])
+    }
+
+
+def interactive_refinement():
+    """
+    대화형 텍스트 교정 인터페이스
+    
+    사용자가 텍스트를 입력하면 즉시 교정 결과를 출력합니다.
+    """
+    print("=" * 70)
+    print("대화 텍스트 교정 시스템")
+    print("=" * 70)
+    print("\n사용법:")
+    print("1. 상담사와 고객의 발화가 이어진 텍스트를 입력하세요")
+    print("2. 입력 완료 후 Enter를 두 번 누르면 교정이 시작됩니다")
+    print("3. 'quit' 또는 'exit'를 입력하면 종료됩니다")
+    print("=" * 70)
+    
+    while True:
+        print("\n텍스트 입력 (완료 후 빈 줄 입력):")
+        lines = []
+        while True:
+            line = input()
+            if line.strip() == "":
+                break
+            if line.strip().lower() in ["quit", "exit"]:
+                print("\n프로그램을 종료합니다.")
+                return
+            lines.append(line)
+        
+        if not lines:
+            print("텍스트가 입력되지 않았습니다. 다시 시도하세요.")
+            continue
+        
+        text = " ".join(lines)
+        
+        print("\n" + "=" * 70)
+        print("교정 중...")
+        print("=" * 70)
+        
+        try:
+            result = refine_conversation_text(text, use_sllm=True)
+            
+            print("\n[원본 텍스트]")
+            print(result["original"])
+            
+            print("\n[교정된 텍스트]")
+            print(result["refined"])
+            
+            print("\n[감지된 카드상품명]")
+            card_candidates = result["step2_morphology"].get("card_candidates", [])
+            if card_candidates:
+                print(", ".join(card_candidates))
+            else:
+                print("없음")
+            
+            print("\n[단어 매칭 결과]")
+            best_match = result["step3_matching"].get("best_match")
+            if best_match:
+                print(f"최적 매칭: {best_match}")
+            else:
+                print("매칭 없음")
+            
+            print("\n[추출된 키워드]")
+            keywords = result.get("keywords", [])
+            if keywords:
+                print(", ".join(keywords))
+            else:
+                print("없음")
+            
+            print("\n" + "=" * 70)
+            
+        except Exception as e:
+            print(f"\n❌ 오류 발생: {e}")
+            import traceback
+            traceback.print_exc()
+
+
+if __name__ == "__main__":
+    # 예시 테스트
+    print("=== 예시 테스트 ===\n")
+    
+    test_cases = [
+        "상담원 안수희입니다 무엇을 도와드릴까요 아 예 안녕하세요 나라사람카드 바우처 때문에 전화드렸는데요",
+        "연예비 납부와 그 바우저 한개 선택하라고 해서 신청할려구요",
+        "이길영업일날 문자로 발송소리가 될 것 같고요",
+        "신세계상품권 등록 좀 해주세요"
+    ]
+    
+    for i, test_text in enumerate(test_cases, 1):
+        print(f"\n[테스트 {i}]")
+        print(f"입력: {test_text}")
+        
+        result = refine_conversation_text(test_text)
+        print(f"출력: {result['refined']}")
+        print("-" * 70)
+    
+    # 대화형 모드 시작
+    print("\n\n대화형 모드를 시작하시겠습니까? (y/n): ", end="")
+    choice = input().strip().lower()
+    
+    if choice == 'y':
+        interactive_refinement()
+    else:
+        print("\n프로그램을 종료합니다.")

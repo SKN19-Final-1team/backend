@@ -54,4 +54,5 @@ Thumbs.db
 .DS_Store
 
 models/
-.wav
+*.wav
+*.md
