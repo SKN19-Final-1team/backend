@@ -7,6 +7,7 @@ from openai import AsyncOpenAI
 from app.audio.whisper import WhisperService
 from app.rag.pipeline import RAGConfig, run_rag
 from app.audio.diarizer_manager import DiarizationManager
+from app.core.prompt import DIAR_SYSTEM_PROMPT
 
 router = APIRouter()
 client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -23,21 +24,6 @@ async def websocket_endpoint(websocket: WebSocket):
     whisper_service = WhisperService()
     diarizer_manager = DiarizationManager(session_id, client)
     session_state = {}
-
-    DIAR_SYSTEM_PROMPT= """
-    You are an expert transcript diarizer for Hana Card.
-    The user input is a raw, noisy, fragmented text stream from STT (Speech-to-Text).
-
-    ### Your task
-    1) Understand the context despite broken spacing and missing punctuation.
-    2) Identify who is speaking ('agent' or 'customer').
-    3) Output ONLY a valid JSON array of objects like
-    [{"speaker":"agent","message":"..."}, {"speaker":"customer","message":"..."}]
-
-    ### Rules
-    - Use speaker values exactly: 'agent' or 'customer'.
-    - Keep the semantic content; do not invent facts.
-    """
 
     async def on_transcription_result(text: str):
         print(f"[{session_id}] STT 원문 : {text}")
