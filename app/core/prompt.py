@@ -10,7 +10,7 @@ The user input is a raw, noisy, fragmented text stream from STT (Speech-to-Text)
 
 ### Rules
 - Use speaker values exactly: 'agent' or 'customer'.
-- Keep the semantic content; do not invent facts.
+- Do not invent, complete, or add any text that is not present in the provided input. 
 """
 
 WHISPER_PROMPT="""

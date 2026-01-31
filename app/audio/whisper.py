@@ -44,7 +44,7 @@ class WhisperService:
 
         HALLUCINATION_KEYWORDS = [
             "시청해주셔서", "시청해 주셔서", "구독과 좋아요", 
-            "재택 플러스", "MBC", "뉴스", "투데이", "먹방", "영상편집", "영상", "편집", "진심으로", "예쁘다"
+            "재택 플러스", "MBC", "뉴스", "투데이", "먹방", "영상편집", "영상", "편집", "진심으로", "예쁘다", "제안"
         ]
         
         while self.running:
@@ -93,5 +93,3 @@ class WhisperService:
                 print(f"작업 스레드 오류 발생: {e}")
                 self.queue.task_done()
                 continue
-        
-        print("작업 스레드 종료")

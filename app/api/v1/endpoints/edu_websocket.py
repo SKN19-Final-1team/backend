@@ -69,7 +69,8 @@ async def edu_websocket_endpoint(websocket: WebSocket):
     
     finally:    
         whisper_service.stop()
-        await asyncio.sleep(1)
+        await asyncio.sleep(2)
+
         final_script = await diarizer_manager.save_to_redis()
 
         print(f"화자 분리 전문 : {final_script}")
