@@ -11,8 +11,8 @@ from app.audio.diarizer_manager import DiarizationManager
 router = APIRouter()
 client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-@router.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
+@router.websocket("/ws/edu")
+async def edu_websocket_endpoint(websocket: WebSocket):
     os.environ.setdefault("RAG_LOG_TIMING", "1")
     await websocket.accept()
     session_id = str(uuid.uuid4())[:8]
@@ -24,36 +24,32 @@ async def websocket_endpoint(websocket: WebSocket):
     diarizer_manager = DiarizationManager(session_id, client)
     session_state = {}
 
-    DIAR_SYSTEM_PROMPT= """
-    You are an expert transcript diarizer for Hana Card.
-    The user input is a raw, noisy, fragmented text stream from STT (Speech-to-Text).
+    async def on_transcription_result(agent_text: str):
+        if not agent_text.strip():
+            return
+        
+        print(f"[{session_id}] 상담원(STT) : {agent_text}")
 
-    ### Your task
-    1) Understand the context despite broken spacing and missing punctuation.
-    2) Identify who is speaking ('agent' or 'customer').
-    3) Output ONLY a valid JSON array of objects like
-    [{"speaker":"agent","message":"..."}, {"speaker":"customer","message":"..."}]
-
-    ### Rules
-    - Use speaker values exactly: 'agent' or 'customer'.
-    - Keep the semantic content; do not invent facts.
-    """
-
-    async def on_transcription_result(text: str):
-        print(f"[{session_id}] STT 원문 : {text}")
+        # --- STT 텍스트(상담원) 적재 ---
+        diarizer_manager.global_items.append({'speaker': 'agent', 'message': agent_text})
                
         try:
-            # --- STT 텍스트 적재 ---
-            if text:
-                await diarizer_manager.add_fragment(text, DIAR_SYSTEM_PROMPT)
-            
+            # --- 상담원 텍스트 고객 llm에 전달 ---
+            # 상준님 여기 추가해주세요
+            # customer_text = llm전달함수(agent_text)
+            customer_text = ''
+        
+            if customer_text:
+                # --- 받은 응답(고객) 적재 ---
+                diarizer_manager.global_items.append({'speaker': 'customer', 'message': customer_text})
+
                 # --- RAG 실행 ---
                 result = await run_rag(
-                    text,
+                    customer_text,
                     config=RAGConfig(top_k=4, normalize_keywords=True),
                     session_state=session_state,
                 )
-                
+                    
             if result and websocket.client_state == WebSocketState.CONNECTED:
                 await websocket.send_json({"type": "rag", "data": result})
 
@@ -73,6 +69,8 @@ async def websocket_endpoint(websocket: WebSocket):
     
     finally:    
         whisper_service.stop()
-        await asyncio.sleep(1)
-        final_script = await diarizer_manager.get_final_script(DIAR_SYSTEM_PROMPT)
+        await asyncio.sleep(2)
+
+        final_script = await diarizer_manager.save_to_redis()
+
         print(f"화자 분리 전문 : {final_script}")

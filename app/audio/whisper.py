@@ -5,6 +5,7 @@ import asyncio
 import time
 from openai import OpenAI
 from dotenv import load_dotenv
+from app.core.prompt import WHISPER_PROMPT
 
 load_dotenv()
 
@@ -43,7 +44,7 @@ class WhisperService:
 
         HALLUCINATION_KEYWORDS = [
             "시청해주셔서", "시청해 주셔서", "구독과 좋아요", 
-            "재택 플러스", "MBC", "뉴스", "투데이", "먹방", "영상편집", "영상", "편집", "진심으로", "예쁘다"
+            "재택 플러스", "MBC", "뉴스", "투데이", "먹방", "영상편집", "영상", "편집", "진심으로", "예쁘다", "제안"
         ]
         
         while self.running:
@@ -63,10 +64,7 @@ class WhisperService:
                     model="whisper-1",
                     file=audio_file,
                     language="ko",
-                    prompt="""한국 신용카드 고객센터 통화 녹취록입니다.
-                    발화된 내용만 원문 그대로 출력하세요. 침묵은 무시하세요.
-                    추가, 바꿔쓰기, 요약, 수정은 일절 금지합니다.
-                    머뭇거림이나 반복되는 부분은 그대로 유지하세요."""
+                    prompt=WHISPER_PROMPT
                 )
                 text = transcript.text.strip()
                 
@@ -95,5 +93,3 @@ class WhisperService:
                 print(f"작업 스레드 오류 발생: {e}")
                 self.queue.task_done()
                 continue
-        
-        print("작업 스레드 종료")

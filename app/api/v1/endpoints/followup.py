@@ -6,6 +6,7 @@ from app.db.scripts.modules.connect_db import connect_db
 from app.db.scripts.modules.update_customer import get_personality_history, update_customer
 from app.utils.get_dialogue import get_dialogue, refine_script
 from fastapi import APIRouter, HTTPException
+from app.core.prompt import FEEDBACK_SYSTEM_PROMPT, EDU_FEEDBACK_SYSTEM_PROMPT
 import time
 import asyncio
 from pydantic import BaseModel
@@ -14,6 +15,7 @@ router = APIRouter()
 
 class SummaryRequest(BaseModel):
     consultation_id: str
+    is_simulation: bool
 
 @router.post("/")
 async def create_summary(request: SummaryRequest):
@@ -26,8 +28,12 @@ async def create_summary(request: SummaryRequest):
         
         # 두 함수 동시에 실행
         summarize_task = get_summarize(script)
-        feedback_task = generate_feedback(script)
-        
+
+        if request.is_simulation:
+            feedback_task = generate_feedback(script, EDU_FEEDBACK_SYSTEM_PROMPT)
+        else:
+            feedback_task = generate_feedback(script, FEEDBACK_SYSTEM_PROMPT)
+            
         summarize_result, feedback = await asyncio.gather(summarize_task, feedback_task)
         
         end_parallel = time.time()
@@ -39,9 +45,14 @@ async def create_summary(request: SummaryRequest):
         if isinstance(feedback, str):
             raise HTTPException(status_code=500, detail=feedback)
 
-        # 감정 점수 계산
-        score = evaluate_call(feedback['emotions'])
-        feedback["emotion_score"] = score.get("emotion_score", 0)
+        if request.is_simulation:
+            # ---상준님 우수 사례랑 비교해서 유사한지 평가하는 함수 추가 ---
+            score = ''
+            feedback['similarity_score'] = score.get("similarity_score", 0)
+        else:
+            # 감정 점수 계산
+            score = evaluate_call(feedback['emotions'])
+            feedback["emotion_score"] = score.get("emotion_score", 0)
 
         print(f"병렬 처리 시간(요약+피드백): {parallel_time:.2f}초")
 
