@@ -8,6 +8,7 @@ from app.audio.diarizer import (
     merge_same_speaker, 
     dedupe_near_duplicates
 )
+from app.llm.delivery.sllm_refiner import refine_diarized_batch
 
 class DiarizationManager:
     def __init__(self, session_id, client):
@@ -70,7 +71,12 @@ class DiarizationManager:
             self.global_items = merge_same_speaker(self.global_items)
             self.global_items = dedupe_near_duplicates(self.global_items, ratio=0.95)
             
-            # === 상준님 전체 보정 코드 추가 ===
+            # 대화 전문 보정
+            # 블로킹 방지를 위해 run_in_executor로 호출 
+            loop = asyncio.get_event_loop()
+            self.global_items = await loop.run_in_executor(
+                None, refine_diarized_batch, self.global_items
+            )
             
             await self.redis.set(
                 f"stt:{self.session_id}", 
