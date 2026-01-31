@@ -108,19 +108,22 @@ def match_and_correct(text: str, candidates: List[str]) -> Dict[str, any]:
         matches = find_candidates(text, top_k=3, threshold=0.5)
         best_match = get_best_match(text, confidence_threshold=0.85)
         
-        # 각 후보에 대한 교정 매핑 생성
+        # 카드상품명 교정 비활성화 (사용자 요청)
+        # 감지만 하고 교체하지 않음
         corrections = {}
-        for candidate in candidates:
-            candidate_matches = find_candidates(candidate, top_k=1, threshold=0.7)
-            if candidate_matches:
-                corrected_name, score = candidate_matches[0]
-                if score >= 0.75:  # 충분히 높은 유사도
-                    corrections[candidate] = corrected_name
+        
+        # [비활성화] 각 후보에 대한 교정 매핑 생성
+        # for candidate in candidates:
+        #     candidate_matches = find_candidates(candidate, top_k=1, threshold=0.7)
+        #     if candidate_matches:
+        #         corrected_name, score = candidate_matches[0]
+        #         if score >= 0.75:  # 충분히 높은 유사도
+        #             corrections[candidate] = corrected_name
         
         return {
             "matches": matches,
             "best_match": best_match,
-            "corrections": corrections
+            "corrections": corrections  # 항상 빈 딕셔너리
         }
     except Exception as e:
         print(f"[Deliverer] 단어 매칭 실패: {e}")
