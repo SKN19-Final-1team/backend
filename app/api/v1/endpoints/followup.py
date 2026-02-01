@@ -46,8 +46,11 @@ async def create_summary(request: SummaryRequest):
             raise HTTPException(status_code=500, detail=feedback)
 
         if request.is_simulation:
-            # ---상준님 우수 사례랑 비교해서 유사한지 평가하는 함수 추가 ---
-            score = ''
+            from app.llm.education.similarity_calculator import calculate_consultation_similarity
+            score = await calculate_consultation_similarity(
+                simulation_transcript=script,
+                consultation_id=request.consultation_id
+            )
             feedback['similarity_score'] = score.get("similarity_score", 0)
         else:
             # 감정 점수 계산

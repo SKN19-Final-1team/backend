@@ -135,59 +135,132 @@ async def get_scenarios():
 async def start_simulation(request: SimulationStartRequest):
     """
     교육 시뮬레이션 시작
-    
+
     Args:
         request: 시뮬레이션 시작 요청 (카테고리, 난이도)
-        
+
     Returns:
         시뮬레이션 세션 정보 (페르소나 프롬프트, 고객 프로필 등)
     """
     conn = get_connection()
-    
+
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            # 해당 카테고리의 상담 사례 중 1개를 랜덤으로 선택
+            # 1. consultations 테이블에서 category_main으로 상담 건 선택
             cur.execute("""
-                SELECT * FROM consultation_documents
-                WHERE category = %s
+                SELECT c.id, c.customer_id
+                FROM consultations c
+                WHERE c.category_main = %s
                 ORDER BY RANDOM()
                 LIMIT 1
             """, (request.category,))
-            
-            consultation = cur.fetchone()
-            
-            if not consultation:
+
+            consultation_row = cur.fetchone()
+
+            if not consultation_row:
                 raise HTTPException(
                     status_code=404,
                     detail=f"카테고리 '{request.category}'에 해당하는 상담 사례가 없습니다."
                 )
-            
-            # 상담 내용 분석
-            analysis = analyze_consultation(consultation["content"])
-            
-            # 고객 프로필 생성
-            customer_profile = {
-                "name": f"고객_{random.randint(1000, 9999)}",
-                "age_group": analysis.get("age_group_inferred", "40대"),
-                "personality_tags": analysis["personality_tags"],
-                "communication_style": analysis["communication_style"],
-                "llm_guidance": analysis["llm_guidance"]
-            }
-            
+
+            consultation_id = consultation_row["id"]
+            customer_id = consultation_row["customer_id"]
+
+            # 2. consultation_documents에서 상담 문서 조회
+            consultation_content = None
+            consultation_title = None
+            consultation_keywords = None
+
+            cur.execute("""
+                SELECT title, keywords, content
+                FROM consultation_documents
+                WHERE consultation_id = %s
+                LIMIT 1
+            """, (consultation_id,))
+
+            doc_row = cur.fetchone()
+            if doc_row:
+                consultation_title = doc_row.get("title")
+                consultation_keywords = doc_row.get("keywords")
+                consultation_content = doc_row.get("content")
+
+            # 3. customers 테이블에서 고객 정보 조회
+            cur.execute("""
+                SELECT name, gender, age_group, grade, card_type,
+                       personality_tags, customer_type_codes
+                FROM customers
+                WHERE id = %s
+            """, (customer_id,))
+
+            customer_row = cur.fetchone()
+
+            # 4. persona_types 테이블에서 페르소나 정보 조회
+            persona_info = None
+            if customer_row and customer_row.get("customer_type_codes"):
+                type_codes = customer_row["customer_type_codes"]
+                if type_codes and len(type_codes) > 0:
+                    cur.execute("""
+                        SELECT name, description, communication_style
+                        FROM persona_types
+                        WHERE code = %s
+                    """, (type_codes[0],))
+                    persona_info = cur.fetchone()
+
+            # 고객 프로필 생성 (DB 정보 + 분석 결과)
+            if customer_row:
+                # DB에서 가져온 실제 고객 정보 사용
+                personality_tags = customer_row.get("personality_tags") or ["normal", "polite"]
+                communication_style = {
+                    "tone": "neutral",
+                    "speed": "moderate"
+                }
+                llm_guidance = "일반적인 응대로 친절하게 안내해주세요."
+
+                # persona_types 정보가 있으면 반영
+                if persona_info:
+                    if persona_info.get("communication_style"):
+                        comm_style = persona_info["communication_style"]
+                        if isinstance(comm_style, dict):
+                            communication_style = comm_style
+                    llm_guidance = persona_info.get("description") or llm_guidance
+
+                customer_profile = {
+                    "name": customer_row.get("name") or f"고객_{random.randint(1000, 9999)}",
+                    "gender": customer_row.get("gender"),
+                    "age_group": customer_row.get("age_group") or "40대",
+                    "grade": customer_row.get("grade"),
+                    "card_type": customer_row.get("card_type"),
+                    "personality_tags": personality_tags,
+                    "communication_style": communication_style,
+                    "llm_guidance": llm_guidance,
+                    "persona_name": persona_info.get("name") if persona_info else None,
+                    "persona_description": persona_info.get("description") if persona_info else None
+                }
+            else:
+                # 고객 정보가 없는 경우 상담 내용 분석으로 대체
+                analysis = analyze_consultation(consultation_content or "")
+                customer_profile = {
+                    "name": f"고객_{random.randint(1000, 9999)}",
+                    "age_group": analysis.get("age_group_inferred", "40대"),
+                    "personality_tags": analysis["personality_tags"],
+                    "communication_style": analysis["communication_style"],
+                    "llm_guidance": analysis["llm_guidance"]
+                }
+
             # 시스템 프롬프트 생성
             system_prompt = create_system_prompt(customer_profile, difficulty=request.difficulty)
-            
-            # 상급 난이도의 경우 각본 생성
+
+            # 상급 난이도의 경우 각본 생성 (상담 전문 필요)
             scenario_script = None
-            if request.difficulty == "advanced":
+            if request.difficulty == "advanced" and consultation_content:
                 scenario_script = create_scenario_script(
-                    consultation["content"],
+                    consultation_content,
                     difficulty="advanced"
                 )
-            
+
             # 세션 ID 생성
-            session_id = f"sim_{consultation['id']}_{random.randint(10000, 99999)}"
-            
+            session_id = f"sim_{consultation_id}_{random.randint(10000, 99999)}"
+
             # 대화 세션 초기화
             initialize_conversation(session_id, system_prompt, customer_profile)
 
@@ -196,8 +269,10 @@ async def start_simulation(request: SimulationStartRequest):
                 "employee_id": request.employee_id,
                 "category": request.category,
                 "difficulty": request.difficulty,
-                "consultation_id": consultation["id"],
-                "consultation_content": consultation["content"],
+                "consultation_id": consultation_id,
+                "consultation_content": consultation_content,
+                "consultation_title": consultation_title,
+                "consultation_keywords": consultation_keywords,
                 "scenario_script": scenario_script,
                 "simulation_type": "best_practice" if request.difficulty == "advanced" else "scenario"
             }
@@ -209,7 +284,7 @@ async def start_simulation(request: SimulationStartRequest):
                 customer_profile=customer_profile,
                 scenario_script=scenario_script
             )
-            
+
     except HTTPException:
         raise
     except Exception as e:
