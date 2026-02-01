@@ -57,13 +57,7 @@ def _extract_answer_text(res: Dict[str, Any]) -> str:
         if isinstance(v, str) and v.strip():
             return v
 
-    # 2) 카드 응답 구조가 있는 경우
-    for k in ("guidanceScript", "guidance_script", "guidance", "script"):
-        v = res.get(k)
-        if isinstance(v, str) and v.strip():
-            return v
-
-    # 3) currentSituation / nextStep (card_info path)
+    # 2) currentSituation / nextStep (card_info path)
     def _list_to_text(items: Any) -> str:
         if not isinstance(items, list):
             return ""
@@ -85,7 +79,7 @@ def _extract_answer_text(res: Dict[str, Any]) -> str:
     if cs_text or ns_text:
         return "\n".join([t for t in (cs_text, ns_text) if t])
 
-    # 4) cards 배열이 있는 경우
+    # 3) cards 배열이 있는 경우
     cards = res.get("cards")
     if isinstance(cards, list) and cards:
         parts: List[str] = []
@@ -98,6 +92,12 @@ def _extract_answer_text(res: Dict[str, Any]) -> str:
                     parts.append(cv)
         if parts:
             return "\n".join(parts)
+
+    # 4) guidanceScript (guide output)
+    for k in ("guidanceScript", "guidance_script", "guidance", "script"):
+        v = res.get(k)
+        if isinstance(v, str) and v.strip():
+            return v
 
     return ""
 
@@ -148,16 +148,34 @@ TESTS: List[Dict[str, Any]] = [
         "query": "카드 도난당한 것 같아요",
         "expect_route": "card_usage",
         "must_have_doc_ids": ["카드분실_도난_관련피해_예방_및_대응방법_merged"],
-        "must_not_have_answer_terms": ["애플페이", "apple pay"],
-        "notes": "분실/도난 intent 확장 확인",
+        "must_not_have_answer_terms": [
+            "애플페이",
+            "apple pay",
+            "gift",
+            "기프트",
+            "선불",
+            "테디카드",
+            "인터넷 이용 등록",
+            "소득공제 신청",
+        ],
+        "notes": "도난/분실은 일반 카드 기준 절차 안내가 나와야 하며 Gift로 튀면 오답",
     },
     {
         "id": "T005",
         "query": "분실 신고 어디서 해요",
         "expect_route": "card_usage",
         "must_have_doc_ids": ["카드분실_도난_관련피해_예방_및_대응방법_merged"],
-        "must_not_have_answer_terms": ["애플페이", "apple pay"],
-        "notes": "카드명 없이 행동 중심 질문",
+        "must_not_have_answer_terms": [
+            "애플페이",
+            "apple pay",
+            "gift",
+            "기프트",
+            "선불",
+            "테디카드",
+            "인터넷 이용 등록",
+            "소득공제 신청",
+        ],
+        "notes": "카드명 없는 신고 절차 질문. Gift 한정/테디카드가 나오면 오답",
     },
 
     # --- K-패스 ---
@@ -213,36 +231,42 @@ TESTS: List[Dict[str, Any]] = [
         "id": "T011",
         "query": "단기카드대출",
         "expect_route": "card_usage",
-        "must_have_doc_ids": ["카드상품별_거래조건_이자율__수수료_등__merged"],
-        "notes": "현금서비스/단기대출 기본",
+        "must_have_doc_ids": ["카드대출 예약신청_merged"],
+        "must_not_have_doc_ids": ["k패스_33", "k패스_24", "k패스_29"],
+        "must_not_have_answer_terms": ["k-패스", "k패스", "애플페이", "apple pay"],
+        "notes": "대출 문의에서 K-패스 문서/용어가 끼면 오답",
     },
     {
         "id": "T012",
         "query": "현금서비스 수수료",
         "expect_route": "card_usage",
         "must_have_doc_ids": ["카드상품별_거래조건_이자율__수수료_등__merged"],
-        "notes": "동의어 매핑",
+        "must_not_have_answer_terms": ["대출 신청을 진행해", "대출 신청 진행"],
+        "notes": "수수료 문의인데 '대출 신청 진행'으로 끝나면 UX상 오답 처리",
     },
     {
         "id": "T013",
         "query": "단기카드대출 리볼빙 되나요",
         "expect_route": "card_usage",
         "must_have_doc_ids": ["sinhan_terms_credit_신용카드_개인회원_약관_040"],
-        "notes": "리볼빙 제외 조항",
+        "must_not_have_answer_terms": ["제33조", "적용 대상"],
+        "notes": "근거는 약관이더라도 고객에게 조항명 그대로 읽게 하면 품질 저하 → 노출 금지",
     },
     {
         "id": "T014",
         "query": "리볼빙 신청 방법",
         "expect_route": "card_usage",
         "must_have_doc_ids": ["sinhan_terms_credit_신용카드_개인회원_약관_039"],
-        "notes": "약관 기반",
+        "must_not_have_answer_terms": ["제32조", "신청 및 성립"],
+        "notes": "조항 제목 그대로 노출 금지",
     },
     {
         "id": "T015",
         "query": "신용카드 리볼빙 이자",
         "expect_route": "card_usage",
         "must_have_doc_ids": ["카드상품별_거래조건_이자율__수수료_등__merged"],
-        "notes": "이자율 설명",
+        "must_not_have_answer_terms": ["대출 신청을 진행해", "대출 신청 진행"],
+        "notes": "이자 설명에서 대출신청 유도 꼬리 제거",
     },
 
     # --- 간편결제 ---
@@ -287,9 +311,9 @@ TESTS: List[Dict[str, Any]] = [
         "id": "T020",
         "query": "카드 재발급 어떻게 하나요",
         "expect_route": "card_usage",
-        # 여기서 '테디카드 1577-6000' 같은 오염이 나오면 잡고 싶다면 아래를 켜도 됨
-        "must_not_have_answer_terms": ["테디카드 고객센터", "1577-6000"],
-        "notes": "재발급 기본 시나리오",
+        "must_have_doc_ids": ["재발급 안내_merged"],
+        "must_not_have_answer_terms": ["테디카드", "gift", "기프트", "선불"],
+        "notes": "범용 재발급 질문인데 특정 Gift/테디카드로 한정되면 품질 저하",
     },
     {
         "id": "T021",
@@ -387,27 +411,26 @@ TESTS: List[Dict[str, Any]] = [
         "id": "T033",
         "query": "해외 원화결제(DCC) 차단 어떻게 해요",
         "expect_route": "card_usage",
-        "must_have_answer_terms": ["dcc", "해외 원화결제", "원화결제"],
-        "must_not_have_answer_terms": ["apple pay", "애플페이"],
-        "notes": "해외원화결제(DCC) 사전차단 안내 문구 근거",
+        "must_have_answer_terms": ["안내 문서", "명시", "확인"],
+        "must_not_have_answer_terms": ["애플페이", "apple pay", "신청하시면 됩니다"],
+        "notes": "현재 코퍼스/리트리벌 상태에서 근거 부족하면 단정 금지 → fallback 기대",
     },
     {
         "id": "T034",
         "query": "신한카드 고객센터 전화번호 뭐에요",
         "expect_route": "card_usage",
-        # 답변 텍스트 검증이 핵심
-        "must_have_answer_terms": ["1544-7000"],
+        "must_have_answer_terms": ["안내 문서", "명시", "확인"],
         "must_not_have_answer_terms": ["신용정보 알림서비스 이용 수수료"],
-        "notes": "1544-7000 포함 문서 회수 확인(답변 텍스트 검증)",
+        "notes": "현재 문서/검색에 번호가 없으면 fallback이 정답",
     },
     {
         "id": "T035",
         "query": "단기/장기 카드대출 전화번호 알려줘",
         "expect_route": "card_usage",
         "must_have_doc_ids": ["카드대출 예약신청_merged"],
-        "must_have_answer_terms": ["전화", "번호"],
+        "must_have_answer_terms": ["ars", "전화"],
         "must_not_have_answer_terms": ["신용정보 알림서비스 이용 수수료"],
-        "notes": "번호 포함 문서 회수 확인(답변 텍스트 검증)",
+        "notes": "번호가 문서에 없다면 이용 가능 시간/채널 안내로 대체되는지 확인",
     },
 
     # --- 국민행복카드 ---

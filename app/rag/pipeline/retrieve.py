@@ -236,7 +236,10 @@ async def retrieve_docs(
         routing_for_retrieve["db_route"] = "guide_tbl"
         routing_for_retrieve["document_sources"] = ["guide_merged", "guide_general"]
         routing_for_retrieve["exclude_sources"] = ["card_products", "terms"]
+        routing_for_retrieve["allow_guide_without_card_match"] = True
         filters_copy = dict(routing_for_retrieve.get("filters", {}))
+        if not filters_copy.get("intent"):
+            filters_copy["intent"] = ["분실도난"]
         filters_copy["exclude_title_terms"] = [
             "K-패스",
             "k패스",
@@ -249,13 +252,18 @@ async def retrieve_docs(
         ]
         routing_for_retrieve["filters"] = filters_copy
 
-    # card_info에서 card_name이 있으면 card_products만 사용
+    # card_info에서 card_name이 있으면 기본은 card_products, 다만 혜택/실적/할인/통신 등은 guide도 허용
     if route_name == "card_info" and filters.get("card_name"):
+        benefit_tokens = ("혜택", "할인", "전월", "실적", "통신", "자동납부", "적립", "캐시백")
+        needs_guide = text_has_any_compact(query, benefit_tokens)
         sources = {"card_products", "service_guide_documents"}
         if routing_for_retrieve is routing:
             routing_for_retrieve = dict(routing)
-        routing_for_retrieve["db_route"] = "card_tbl"
-        routing_for_retrieve.pop("allow_guide_without_card_match", None)
+        routing_for_retrieve["db_route"] = "both" if needs_guide else "card_tbl"
+        if needs_guide:
+            routing_for_retrieve["allow_guide_without_card_match"] = True
+        else:
+            routing_for_retrieve.pop("allow_guide_without_card_match", None)
 
     # 특수 카드 엔티티는 guide 문서도 함께 포함
     if route_name == "card_info" and matched_entity:
@@ -265,6 +273,11 @@ async def retrieve_docs(
         routing_for_retrieve["document_sources"] = ["guide_merged", "guide_general"]
         filters_copy = dict(routing_for_retrieve.get("filters", {}))
         filters_copy["card_name"] = [matched_entity]
+        if matched_entity == "K-패스" and "다자녀" not in normalized_query:
+            exclude_terms = list(filters_copy.get("exclude_title_terms") or [])
+            if "다자녀" not in exclude_terms:
+                exclude_terms.append("다자녀")
+            filters_copy["exclude_title_terms"] = exclude_terms
         routing_for_retrieve["filters"] = filters_copy
         routing_for_retrieve["boost"] = filters_copy
 
@@ -383,6 +396,23 @@ async def retrieve_docs(
                 tables=sorted(sources),
                 top_k=top_k,
             )
+    # filter noisy K-패스 docs for loss/loan queries early
+    def _is_kpass_doc(doc: Dict[str, Any]) -> bool:
+        title = str(doc.get("title") or "").lower()
+        content = str(doc.get("content") or "").lower()
+        return "k패스" in title or "k-패스" in title or "k패스" in content or "k-패스" in content
+
+    loan_terms = ("대출", "현금서비스", "카드대출", "리볼빙")
+    loss_terms_query = ("분실", "도난", "잃어버")
+    if any(term in normalized_query for term in loan_terms + loss_terms_query):
+        filtered = [doc for doc in retrieved_docs if not _is_kpass_doc(doc)]
+        retrieved_docs = filtered or retrieved_docs
+
+    # ensure score is numeric and sort by score desc
+    for doc in retrieved_docs:
+        if not isinstance(doc.get("score"), (int, float)):
+            doc["score"] = 0.0
+    retrieved_docs.sort(key=lambda d: d.get("score", 0.0), reverse=True)
 
     critical_pin = False
     if route_name == "card_usage":

@@ -209,6 +209,20 @@ async def run_search(
                 await retrieval_cache_set(cache_key, entries)
                 if retrieve_cache_status == "off":
                     retrieve_cache_status = "miss"
+    # normalize docs ordering and remove noisy k-pass for loss/loan queries (cache-safe)
+    def _is_kpass_doc(doc: Dict[str, Any]) -> bool:
+        title = str(doc.get("title") or "").lower()
+        content = str(doc.get("content") or "").lower()
+        return "k패스" in title or "k-패스" in title or "k패스" in content or "k-패스" in content
+
+    normalized_query = query.lower()
+    if any(term in normalized_query for term in ("분실", "도난", "잃어버", "대출", "현금서비스", "카드대출", "리볼빙")):
+        filtered_docs = [doc for doc in docs if not _is_kpass_doc(doc)]
+        docs = filtered_docs or docs
+    for doc in docs:
+        if not isinstance(doc.get("score"), (int, float)):
+            doc["score"] = 0.0
+    docs.sort(key=lambda d: d.get("score", 0.0), reverse=True)
     if consult_task:
         consult_docs = await consult_task
         if (routing.get("route") or routing.get("ui_route")) != "card_usage":

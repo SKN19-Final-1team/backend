@@ -193,6 +193,12 @@ def _extract_query_terms(query: str) -> List[str]:
             continue
         if term in _STOPWORDS_LOWER:
             continue
+        if term.startswith("잃어버"):
+            terms.append("잃어버")
+        if term.startswith("분실"):
+            terms.append("분실")
+        if term.startswith("도난"):
+            terms.append("도난")
         terms.append(term)
     return unique_in_order(terms)
 
