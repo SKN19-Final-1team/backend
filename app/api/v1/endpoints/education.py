@@ -18,6 +18,16 @@ from app.llm.education.tts_speaker import (
     end_conversation,
     get_session_info
 )
+from app.llm.education.evaluation import evaluate_simulation_result
+from app.llm.education.result_manager import (
+    save_simulation_result,
+    get_employee_analytics,
+    get_simulation_history
+)
+
+
+# 시뮬레이션 메타데이터 저장 (세션별)
+_simulation_metadata: Dict[str, Dict[str, Any]] = {}
 
 
 router = APIRouter()
@@ -32,6 +42,7 @@ class SimulationStartRequest(BaseModel):
     """시뮬레이션 시작 요청"""
     category: str  # 문의 유형 (예: "도난/분실 신청/해제")
     difficulty: str  # "beginner" 또는 "advanced"
+    employee_id: Optional[str] = None  # 직원 ID (결과 저장용)
 
 
 class SimulationStartResponse(BaseModel):
@@ -71,6 +82,8 @@ class ConversationEndResponse(BaseModel):
     turn_count: int
     duration_seconds: float
     conversation_history: List[Dict[str, str]]
+    evaluation: Optional[Dict[str, Any]] = None
+    result_id: Optional[str] = None
 
 
 @router.get("/scenarios", response_model=ScenarioListResponse)
@@ -177,7 +190,18 @@ async def start_simulation(request: SimulationStartRequest):
             
             # 대화 세션 초기화
             initialize_conversation(session_id, system_prompt, customer_profile)
-            
+
+            # 시뮬레이션 메타데이터 저장 (종료 시 평가에 사용)
+            _simulation_metadata[session_id] = {
+                "employee_id": request.employee_id,
+                "category": request.category,
+                "difficulty": request.difficulty,
+                "consultation_id": consultation["id"],
+                "consultation_content": consultation["content"],
+                "scenario_script": scenario_script,
+                "simulation_type": "best_practice" if request.difficulty == "advanced" else "scenario"
+            }
+
             return SimulationStartResponse(
                 session_id=session_id,
                 system_prompt=system_prompt,
@@ -254,19 +278,72 @@ async def get_history(session_id: str):
 @router.post("/simulation/{session_id}/end", response_model=ConversationEndResponse)
 async def end_simulation(session_id: str):
     """
-    시뮬레이션 종료
-    
+    시뮬레이션 종료 및 평가
+
     Args:
         session_id: 세션 ID
-        
+
     Returns:
-        대화 요약 정보
+        대화 요약 정보 및 평가 결과
     """
     try:
         summary = end_conversation(session_id)
-        
-        return ConversationEndResponse(**summary)
-        
+
+        # 메타데이터 조회
+        metadata = _simulation_metadata.pop(session_id, None)
+
+        evaluation = None
+        result_id = None
+
+        if metadata:
+            # 대화 전문 생성
+            transcript = "\n".join([
+                f"{'상담원' if msg['role'] == 'agent' else '고객'}: {msg['content']}"
+                for msg in summary.get("conversation_history", [])
+            ])
+
+            # 시나리오 각본 (상급 난이도일 때만)
+            scenario_script = metadata.get("scenario_script") or {
+                "expected_flow": ["상담 시작", "문의 파악", "해결책 제시", "상담 종료"],
+                "key_points": ["고객 니즈 파악", "정확한 정보 제공"],
+                "evaluation_criteria": {}
+            }
+
+            # 평가 수행
+            evaluation = evaluate_simulation_result(
+                simulation_transcript=transcript,
+                original_transcript=metadata.get("consultation_content"),
+                scenario_script=scenario_script,
+                simulation_type=metadata.get("simulation_type", "scenario")
+            )
+
+            # 결과 저장 (employee_id가 있는 경우만)
+            employee_id = metadata.get("employee_id")
+            if employee_id:
+                try:
+                    result_id = save_simulation_result(
+                        employee_id=employee_id,
+                        simulation_type=metadata.get("simulation_type", "scenario"),
+                        original_consultation_id=metadata.get("consultation_id"),
+                        scenario_id=None,
+                        scores=evaluation,
+                        feedback_data=evaluation.get("feedback", {}),
+                        call_duration=int(summary.get("duration_seconds", 0)),
+                        recording_transcript=transcript
+                    )
+                except Exception as save_error:
+                    print(f"[Education] 결과 저장 실패: {save_error}")
+
+        return ConversationEndResponse(
+            session_id=summary["session_id"],
+            customer_name=summary["customer_name"],
+            turn_count=summary["turn_count"],
+            duration_seconds=summary["duration_seconds"],
+            conversation_history=summary["conversation_history"],
+            evaluation=evaluation,
+            result_id=result_id
+        )
+
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
@@ -277,21 +354,68 @@ async def end_simulation(session_id: str):
 async def get_simulation_status(session_id: str):
     """
     시뮬레이션 상태 조회
-    
+
     Args:
         session_id: 세션 ID
-        
+
     Returns:
         세션 상태 정보
     """
     session_info = get_session_info(session_id)
-    
+
     if not session_info:
         raise HTTPException(status_code=404, detail=f"세션을 찾을 수 없습니다: {session_id}")
-    
+
     return {
         "session_id": session_info["session_id"],
         "customer_name": session_info["customer_name"],
         "turn_count": session_info["turn_count"],
         "status": "active"
+    }
+
+
+@router.get("/analytics/{employee_id}")
+async def get_analytics(employee_id: str):
+    """
+    직원 학습 분석 데이터 조회
+
+    Args:
+        employee_id: 직원 ID
+
+    Returns:
+        학습 분석 데이터
+    """
+    analytics = get_employee_analytics(employee_id)
+
+    if not analytics:
+        return {
+            "employee_id": employee_id,
+            "total_simulations": 0,
+            "average_score": 0,
+            "pass_rate": 0,
+            "message": "아직 시뮬레이션 기록이 없습니다."
+        }
+
+    return analytics
+
+
+@router.get("/history/{employee_id}")
+async def get_history_endpoint(employee_id: str, limit: int = 10, offset: int = 0):
+    """
+    직원 시뮬레이션 히스토리 조회
+
+    Args:
+        employee_id: 직원 ID
+        limit: 조회 개수 (기본: 10)
+        offset: 시작 위치 (기본: 0)
+
+    Returns:
+        시뮬레이션 결과 리스트
+    """
+    history = get_simulation_history(employee_id, limit, offset)
+
+    return {
+        "employee_id": employee_id,
+        "results": history,
+        "count": len(history)
     }
