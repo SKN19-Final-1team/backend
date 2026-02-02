@@ -2,6 +2,7 @@ from app.utils.evaluate_call import evaluate_call
 from app.llm.follow_up.feedback_generator import generate_feedback
 from app.llm.follow_up.summarize_generator import get_summarize
 from app.llm.follow_up.personality_generator import get_personality, determine_personality
+from app.llm.education.similarity_calculator import calculate_consultation_similarity
 from app.db.scripts.modules.connect_db import connect_db
 from app.db.scripts.modules.update_customer import get_personality_history, update_customer
 from app.utils.get_dialogue import get_dialogue, refine_script
@@ -46,8 +47,10 @@ async def create_summary(request: SummaryRequest):
             raise HTTPException(status_code=500, detail=feedback)
 
         if request.is_simulation:
-            # ---상준님 우수 사례랑 비교해서 유사한지 평가하는 함수 추가 ---
-            score = ''
+            score = await calculate_consultation_similarity(
+                simulation_transcript=script,
+                consultation_id=request.consultation_id
+            )
             feedback['similarity_score'] = score.get("similarity_score", 0)
         else:
             # 감정 점수 계산

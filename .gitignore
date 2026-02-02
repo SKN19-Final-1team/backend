@@ -27,6 +27,7 @@ docker-compose.override.yml
 .cursor/
 .vscode/
 .github/
+.claude/
 .idea/
 *.swp
 *.swo
