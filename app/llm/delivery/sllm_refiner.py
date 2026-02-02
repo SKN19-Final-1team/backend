@@ -150,7 +150,7 @@ def refine_diarized_batch(utterances: List[Dict]) -> List[Dict]:
     user_content = "다음 발화들을 교정하세요:\n\n" + "\n".join(input_lines)
     
     # 3. sLLM 호출
-    payload = {
+    refinement_payload = {
         "model": MODEL_NAME,
         "messages": [
             {"role": "system", "content": get_batch_refinement_prompt()},
@@ -163,7 +163,7 @@ def refine_diarized_batch(utterances: List[Dict]) -> List[Dict]:
     }
     
     try:
-        output = call_runpod(payload)
+        output = call_runpod(refinement_payload)
     except Exception as e:
         print(f"[Refiner] sLLM 호출 실패: {e}")
         output = None
@@ -212,5 +212,87 @@ def refine_diarized_batch(utterances: List[Dict]) -> List[Dict]:
 def get_model_name() -> str:
     return MODEL_NAME
 
-# 필요한 경우 싱글턴 교정 함수 등을 여기에 남겨둘 수 있습니다.
-# 현재는 서비스 로직인 refine_diarized_batch에 집중하여 정리했습니다.
+
+# ==========================================
+# 5. Single Text Refinement (Whisper용)
+# ==========================================
+
+def get_single_refinement_prompt() -> str:
+    """
+    단일 텍스트 교정용 시스템 프롬프트
+    """
+    return """당신은 금융 상담 STT 교정 AI입니다.
+
+**역할:** STT 오류를 교정합니다.
+
+**교정 대상:**
+1. 발음 오인식: "연예비"→"연회비", "바우저"→"바우처", "환도"→"한도"
+2. 외국어 할루시네이션: 삭제
+3. 불필요한 삽입어: 문맥에 맞지 않으면 삭제
+
+**금지:**
+- 원문 의미 변경
+- 과도한 문체 변환
+
+**출력 형식 (JSON만 출력):**
+{"text": "교정된 문장"}
+"""
+
+
+def refinement_payload(text: str) -> Dict:
+    """
+    단일 텍스트 교정을 위한 RunPod API payload를 생성합니다.
+
+    Args:
+        text: 교정할 원본 텍스트
+
+    Returns:
+        RunPod API 호출용 payload 딕셔너리
+    """
+    # 1차 교정 (correction_map 적용)
+    correction_map = load_correction_map()
+    corrected_text = apply_correction_map(text, correction_map)
+
+    return {
+        "model": MODEL_NAME,
+        "messages": [
+            {"role": "system", "content": get_single_refinement_prompt()},
+            {"role": "user", "content": f"다음 문장을 교정하세요:\n\n{corrected_text}"}
+        ],
+        "temperature": 0.1,
+        "max_tokens": 1024,
+        "top_p": 0.9,
+        "stream": False
+    }
+
+
+def parse_refinement_result(llm_output: Optional[str], original_text: str) -> Dict[str, str]:
+    """
+    LLM 출력을 파싱하여 교정된 텍스트를 반환합니다.
+
+    Args:
+        llm_output: LLM으로부터 받은 출력
+        original_text: 원본 텍스트 (파싱 실패 시 fallback용)
+
+    Returns:
+        {"text": "교정된 텍스트"} 형태의 딕셔너리
+    """
+    if not llm_output:
+        return {"text": original_text}
+
+    try:
+        json_str = extract_json_content(llm_output)
+        if json_str:
+            result = json.loads(json_str)
+            if isinstance(result, dict) and result.get("text"):
+                return {"text": result["text"]}
+
+        print(f"[Refiner] JSON 추출 실패. Raw: {llm_output[:100]}...")
+        return {"text": original_text}
+
+    except json.JSONDecodeError as e:
+        print(f"[Refiner] JSON 파싱 에러: {e}")
+        return {"text": original_text}
+    except Exception as e:
+        print(f"[Refiner] 결과 처리 중 에러: {e}")
+        return {"text": original_text}

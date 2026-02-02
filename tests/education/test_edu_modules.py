@@ -8,8 +8,8 @@ import sys
 import json
 
 # 프로젝트 경로 추가
-sys.path.insert(0, r"c:\SKN19\backend")
-os.chdir(r"c:\SKN19\backend")
+sys.path.insert(0, r"c:\Projects\backend")
+os.chdir(r"c:\Projects\backend")
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -281,7 +281,7 @@ log("-" * 40)
 followup_results = {"import": "FAIL", "call": "FAIL"}
 try:
     # followup.py에서 similarity_calculator import 확인
-    with open(r"c:\SKN19\backend\app\api\v1\endpoints\followup.py", "r", encoding="utf-8") as f:
+    with open(r"c:\Projects\backend\app\api\v1\endpoints\followup.py", "r", encoding="utf-8") as f:
         content = f.read()
 
     if "from app.llm.education.similarity_calculator import calculate_consultation_similarity" in content:
@@ -317,7 +317,7 @@ output = {
     "log": results
 }
 
-with open(r"c:\SKN19\backend\test_results.json", "w", encoding="utf-8") as f:
+with open(r"c:\Projects\backend\test_results.json", "w", encoding="utf-8") as f:
     json.dump(output, f, ensure_ascii=False, indent=2)
 
 log("\n결과가 test_results.json에 저장되었습니다.")
