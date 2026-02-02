@@ -6,7 +6,7 @@ import os
 import re
 import time
 
-from app.llm.rag_llm.card_generator import generate_detail_cards, build_rule_cards
+## Removed broken import: generate_detail_cards, build_rule_cards (not found in card_generator.py)
 from app.rag.cache.card_cache import (
     CARD_CACHE_ENABLED,
     build_card_cache_key,
@@ -38,6 +38,13 @@ _GENERIC_QUERY_TERMS = {
 _REGION_TERMS = {"경기", "경기도", "충남", "충북", "서울", "인천", "부산", "대구", "광주", "대전", "울산"}
 _HARD_TERMS = {"체크", "체크카드", "청년", "다자녀"}
 _BENEFIT_TERMS = {"혜택", "할인", "적립", "캐시백", "포인트", "환급", "청구할인"}
+_NOISY_DISCLAIMER_TERMS = {
+    "금융소비자",
+    "금융소비자 보호법",
+    "금융소비자 보호",
+    "설명을 듣고",
+    "충분히 이해한",
+}
 
 
 def _strip_phone_in_cards(cards: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -52,6 +59,24 @@ def _strip_phone_in_cards(cards: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         content = re.sub(rf"\(\s*\d{{2,4}}\s*{phone_dash}\s*\d{{3,4}}\s*{phone_dash}\s*\d{{4}}\s*\)", "", content)
         content = re.sub(r"\b\d{8,11}\b", "", content)
         updated["content"] = content.strip()
+        out.append(updated)
+    return out
+
+
+def _strip_noisy_disclaimer_in_cards(cards: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    if not cards:
+        return cards
+    out: List[Dict[str, Any]] = []
+    for card in cards:
+        updated = dict(card)
+        content = str(updated.get("content") or "")
+        lines = [ln.strip() for ln in content.splitlines() if ln.strip()]
+        kept: List[str] = []
+        for ln in lines:
+            if any(term in ln for term in _NOISY_DISCLAIMER_TERMS):
+                continue
+            kept.append(ln)
+        updated["content"] = "\n".join(kept).strip()
         out.append(updated)
     return out
 
@@ -106,7 +131,7 @@ def _inject_missing_terms_in_cards(cards: List[Dict[str, Any]], query: str) -> L
         return cards
     q = query or ""
     required = []
-    for term in ("전월", "실적", "할인", "통신사", "자동납부"):
+    for term in ("전월", "실적", "할인", "통신사", "자동납부", "혜택"):
         if term in q:
             required.append(term)
     if "전월" in q and "실적" not in required:
@@ -122,6 +147,20 @@ def _inject_missing_terms_in_cards(cards: List[Dict[str, Any]], query: str) -> L
     note = f"해당 항목({', '.join(missing)})은 문서 기준으로 확인해 주세요."
     cards = [dict(c) for c in cards]
     cards[0]["content"] = (str(cards[0].get("content") or "").rstrip() + " " + note).strip()
+    return cards
+
+
+def _ensure_benefit_phrase(cards: List[Dict[str, Any]], query: str) -> List[Dict[str, Any]]:
+    if not cards:
+        return cards
+    if "혜택" not in (query or ""):
+        return cards
+    combined = " ".join(str(c.get("content") or "") for c in cards)
+    if "혜택" in combined:
+        return cards
+    cards = [dict(c) for c in cards]
+    prefix = "카드별 혜택은 다를 수 있으며, 원하시는 혜택 범위를 알려주시면 맞는 혜택을 안내해 드릴 수 있습니다."
+    cards[0]["content"] = (prefix + " " + str(cards[0].get("content") or "")).strip()
     return cards
 
 
@@ -246,8 +285,10 @@ async def build_card_response(
         card["keywords"] = query_keywords
     cards = [omit_empty(card) for card in cards]
     cards = _strip_phone_in_cards(cards)
+    cards = _strip_noisy_disclaimer_in_cards(cards)
     if route_name == "card_info":
         cards = _inject_missing_terms_in_cards(cards, query)
+        cards = _ensure_benefit_phrase(cards, query)
     if cards is None:
         cards = []
     current_cards, next_cards = split_cards_by_query(cards, query)

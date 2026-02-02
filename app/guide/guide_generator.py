@@ -6,8 +6,8 @@ import re
 
 from app.guide.guide_client import generate_guide_text
 
-MAX_DOCS = int(os.getenv("GUIDE_MAX_DOCS", "3"))
-MAX_CONSULT_DOCS = int(os.getenv("GUIDE_MAX_CONSULT_DOCS", "2"))
+MAX_DOCS = int(os.getenv("GUIDE_MAX_DOCS", "2"))
+MAX_CONSULT_DOCS = int(os.getenv("GUIDE_MAX_CONSULT_DOCS", "1"))
 MAX_SNIPPET_CHARS = int(os.getenv("GUIDE_MAX_SNIPPET_CHARS", "600"))
 
 _PHONE_PATTERN = re.compile(r"\b\d{2,4}-\d{3,4}-\d{4}\b|\b\d{8,13}\b")
@@ -20,8 +20,10 @@ _FILLER_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _SENT_SPLIT = re.compile(r"(?<=[.!?。！？])\s+")
+_GUIDE_TERM_RE = re.compile(r"[A-Za-z0-9가-힣]+")
 _UNIT_WITHOUT_NUMBER = re.compile(r"(?<![0-9가-힣])(원|일|월|시|분|개월|건|%)(?![0-9가-힣])")
 _CLAUSE_PATTERN = re.compile(r"제\s*\d+\s*조")
+_CLAUSE_ITEM_PATTERN = re.compile(r"[①-⑳]|(?:^|\s)\d+\s*[.)]")
 _DOC_TITLE_PATTERN = re.compile(r"\b\w*(?:_\w*){2,}\b")
 _DOC_TRAIL_PATTERN = re.compile(r"[가-힣A-Za-z0-9_]*대응방법")
 _ACCOUNT_ASSERT_PATTERN = re.compile(
@@ -41,6 +43,11 @@ _LOSS_HARD_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _INSTANT_BLOCK_PATTERN = re.compile(r"즉시\s*(정지|차단)", re.IGNORECASE)
+_INSTANT_HANDLE_PATTERN = re.compile(
+    r"(바로|즉시).*(접수|처리|조치|정지|중지).*(해\s*드리|해드리|하겠|합니다)",
+    re.IGNORECASE,
+)
+_INSTANT_ASSERT_PATTERN = re.compile(r"즉시\s*(정지|중지|차단|처리)\w*", re.IGNORECASE)
 _GARBLED_PATTERN = re.compile(r"기재확인이\s*필요합니다지")
 _QUESTION_ALLOWED_PATTERNS = [
     re.compile(r"(어느|어떤).*(카드사|은행)"),
@@ -60,6 +67,18 @@ _FILLER_TOKENS = {
     "고객",
 }
 
+_BAD_DETAIL_PATTERN = re.compile(
+    r"(아래\s*표|다음\s*표|표와\s*같|고객센터|콜센터|문의|연락처|전화|"
+    r"금융소비자|유의사항|주의사항|예방\s*수칙|비밀번호|주민등록번호|생일|"
+    r"연속된\s*숫자|제\s*\d+\s*조|[①-⑳])",
+    re.IGNORECASE,
+)
+
+
+def _doc_text(doc: Dict[str, Any]) -> str:
+    meta = doc.get("metadata") or {}
+    return str(doc.get("detailContent") or meta.get("full_content") or doc.get("content") or "")
+
 
 def _truncate(text: str, limit: int) -> str:
     text = (text or "").strip()
@@ -76,9 +95,76 @@ def _redact(text: str) -> str:
     cleaned = _PLACEHOLDER_PATTERN.sub("", cleaned)
     cleaned = _SPEAKER_PATTERN.sub("", cleaned)
     cleaned = _FILLER_PATTERN.sub("", cleaned)
-    cleaned = _UNIT_WITHOUT_NUMBER.sub("", cleaned)
     cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
     return cleaned
+
+
+def _extract_query_terms_for_guide(query: str) -> List[str]:
+    raw_terms = _GUIDE_TERM_RE.findall(query or "")
+    terms = [term.lower() for term in raw_terms if len(term) >= 2]
+    seen = set()
+    out: List[str] = []
+    for term in terms:
+        if term in seen:
+            continue
+        seen.add(term)
+        out.append(term)
+    return out
+
+
+def _extract_relevant_snippet_for_guide(query: str, content: str, limit: int) -> str:
+    if not content:
+        return ""
+    terms = _extract_query_terms_for_guide(query)
+    sents = [s.strip() for s in _SENT_SPLIT.split(content) if s and s.strip()]
+    if not sents:
+        return ""
+    picked: List[str] = []
+    total = 0
+    for s in sents:
+        if _BAD_DETAIL_PATTERN.search(s):
+            continue
+        if terms and not any(t in s.lower() for t in terms):
+            continue
+        chunk = _redact(s)
+        if not chunk:
+            continue
+        if picked and total + len(chunk) + 1 > limit:
+            break
+        picked.append(chunk)
+        total += len(chunk) + 1
+        if total >= limit:
+            break
+    if not picked:
+        for s in sents:
+            if _BAD_DETAIL_PATTERN.search(s):
+                continue
+            chunk = _redact(s)
+            if chunk:
+                return _truncate(chunk, limit)
+        return _truncate(_redact(sents[0]), limit)
+    return _truncate(" ".join(picked), limit)
+
+
+def _pick_doc_detail(docs: List[Dict[str, Any]]) -> str:
+    if not docs:
+        return ""
+    content = _redact(_doc_text(docs[0]))
+    if not content:
+        return ""
+    sents = [s.strip() for s in _SENT_SPLIT.split(content) if s and s.strip()]
+    if not sents:
+        return ""
+    for s in sents:
+        if _BAD_DETAIL_PATTERN.search(s):
+            continue
+        if re.search(r"\d", s):
+            return _truncate(s, 140)
+    for s in sents:
+        if _BAD_DETAIL_PATTERN.search(s):
+            continue
+        return _truncate(s, 140)
+    return ""
 
 
 def _summarize_consult_snippet(text: str, limit: int = 180) -> str:
@@ -106,7 +192,7 @@ def _sort_docs_for_guide(query: str, docs: List[Dict[str, Any]]) -> List[Dict[st
 
     def _score(doc: Dict[str, Any]) -> tuple[int, float]:
         title = str(doc.get("title") or "").lower()
-        content = str(doc.get("content") or "").lower()
+        content = _doc_text(doc).lower()
         text = f"{title} {content}"
         hit = sum(1 for t in query_terms if t in text)
         score = float(doc.get("score") or 0.0)
@@ -141,9 +227,19 @@ def _filter_docs_by_intent(query: str, docs: List[Dict[str, Any]]) -> List[Dict[
         filtered = []
         for doc in docs:
             title = str(doc.get("title") or "").lower()
-            content = str(doc.get("content") or "").lower()
+            content = _doc_text(doc).lower()
             text = f"{title} {content}"
             if any(term in text for term in ["gift", "기프트", "선불", "테디카드"]):
+                continue
+            filtered.append(doc)
+        docs = filtered or docs
+    if intent == "loss" and not any(term in q_lower for term in ["재발급", "재발행", "수령", "입대", "훈련소", "전역"]):
+        filtered = []
+        for doc in docs:
+            title = str(doc.get("title") or "").lower()
+            content = _doc_text(doc).lower()
+            text = f"{title} {content}"
+            if any(term in text for term in ["재발급", "재발행", "수령", "신청 후", "입대", "훈련소"]):
                 continue
             filtered.append(doc)
         docs = filtered or docs
@@ -160,7 +256,7 @@ def _filter_docs_by_intent(query: str, docs: List[Dict[str, Any]]) -> List[Dict[
     filtered = []
     for doc in docs:
         title = str(doc.get("title") or "").lower()
-        content = str(doc.get("content") or "").lower()
+        content = _doc_text(doc).lower()
         text = f"{title} {content}"
         if any(term in text for term in intent_terms):
             filtered.append(doc)
@@ -185,12 +281,12 @@ def _is_low_content_sentence(sentence: str) -> bool:
     return not meaningful
 
 
-def _build_doc_block(docs: List[Dict[str, Any]], max_docs: int) -> str:
+def _build_doc_block(query: str, docs: List[Dict[str, Any]], max_docs: int) -> str:
     parts: List[str] = []
     for idx, doc in enumerate(docs[:max_docs], 1):
         title = (doc.get("title") or (doc.get("metadata") or {}).get("title") or "").strip()
-        content = doc.get("content") or ""
-        snippet = _truncate(_redact(content), MAX_SNIPPET_CHARS)
+        content = _doc_text(doc)
+        snippet = _extract_relevant_snippet_for_guide(query, content, MAX_SNIPPET_CHARS)
         title = _redact(title)
         if not title and not snippet:
             continue
@@ -219,8 +315,10 @@ def _build_consult_block(docs: List[Dict[str, Any]], max_docs: int) -> str:
 def _build_messages(query: str, docs: List[Dict[str, Any]], consult_docs: List[Dict[str, Any]]) -> List[Dict[str, str]]:
     docs = _filter_docs_by_intent(query, docs)
     docs = _sort_docs_for_guide(query, docs)
-    doc_block = _build_doc_block(docs, MAX_DOCS)
+    doc_block = _build_doc_block(query, docs, MAX_DOCS)
     consult_docs = _filter_consult_by_intent(query, consult_docs)
+    if docs:
+        consult_docs = []
     consult_block = _build_consult_block(consult_docs, MAX_CONSULT_DOCS)
 
     system_prompt = (
@@ -254,6 +352,8 @@ def _build_messages(query: str, docs: List[Dict[str, Any]], consult_docs: List[D
         "[근거 사용]\n"
         "- 반드시 Documents 내용에 근거한 문장만 작성하세요.\n"
         "- Documents에 없는 절차/정책/요금/기간/조건은 절대 만들지 마세요.\n\n"
+        "[필수 디테일]\n"
+        "- Documents에 포함된 구체적 디테일을 최소 1개는 반드시 포함하세요.\n\n"
 
         "항상 상담원이 고객에게 바로 읽어주는 상황을 가정하고, 간결하고 단정하게 작성하세요."
     )
@@ -278,14 +378,8 @@ def _normalize_output(text: str) -> str:
     t = _PLACEHOLDER_PATTERN.sub("", t)
     t = _FILLER_PATTERN.sub("", t)
     t = _CLAUSE_PATTERN.sub("", t)
-    t = _DOC_TITLE_PATTERN.sub("", t)
-    t = _DOC_TRAIL_PATTERN.sub("", t)
+    t = _CLAUSE_ITEM_PATTERN.sub("", t)
     t = _GIFT_TERMS_PATTERN.sub("", t)
-    t = _UNIT_WITHOUT_NUMBER.sub("", t)
-    t = _ACCOUNT_ASSERT_PATTERN.sub("확인이 필요합니다", t)
-    t = _HARD_ASSERT_PATTERN.sub("진행하실 수 있습니다", t)
-    t = _LOSS_HARD_PATTERN.sub("신고하실 수 있습니다", t)
-    t = _INSTANT_BLOCK_PATTERN.sub("정지될 수 있습니다", t)
     t = _GARBLED_PATTERN.sub("기재되어 있지 않아", t)
     t = re.sub(r"\s{2,}", " ", t).strip()
     if not t:
@@ -297,8 +391,9 @@ def _normalize_output(text: str) -> str:
         s
         for s in sents
         if not _is_low_content_sentence(s)
-        and not _HARD_ASSERT_PATTERN.search(s)
-        and not _LOSS_HARD_PATTERN.search(s)
+        and not _ACCOUNT_ASSERT_PATTERN.search(s)
+        and not _INSTANT_HANDLE_PATTERN.search(s)
+        and not _INSTANT_ASSERT_PATTERN.search(s)
     ]
     if not filtered:
         return ""
@@ -311,18 +406,14 @@ def _normalize_output(text: str) -> str:
     return " ".join(normalized_sents).strip()
 
 
-def _question_allowed(sentence: str) -> bool:
+def _question_allowed(sentence: str, intent: str) -> bool:
     if "?" not in sentence and not sentence.strip().endswith("요"):
         return False
-    if _QUESTION_ALLOWED_PATTERNS[0].search(sentence):
-        return True
     if any(token in sentence for token in ["카드 번호", "본인 확인", "인증"]):
         return False
     if "확인해 주시겠" in sentence or "확인해주시겠" in sentence:
         return False
-    if any(token in sentence for token in ["어느", "어떤", "어디", "몇", "경로"]):
-        return False
-    return any(pattern.search(sentence) for pattern in _QUESTION_ALLOWED_PATTERNS)
+    return True
 
 
 def _apply_question_policy(text: str, query: str) -> str:
@@ -333,56 +424,43 @@ def _apply_question_policy(text: str, query: str) -> str:
         return ""
     kept: List[str] = []
     questions: List[str] = []
+    intent = _detect_intent(query)
     for sent in sents:
-        if _question_allowed(sent):
+        if _question_allowed(sent, intent):
             questions.append(sent)
         elif "?" in sent:
             continue
         else:
             kept.append(sent)
     if questions:
-        kept = kept[:2] + [questions[0]]
+        selected = questions[0]
+        q_lower = (query or "").lower()
+        if intent == "loss" and "입대" in selected and not any(term in q_lower for term in ["입대", "재발급", "훈련소", "전역"]):
+            selected = "분실인지 도난인지 확인해 주세요"
+        kept = kept[:2] + [selected]
     else:
-        intent = _detect_intent(query)
         if intent == "loss":
-            kept = kept[:2] + ["분실인지 도난인지 확인해 주세요?"]
+            kept = kept[:2] + ["분실인지 도난인지 확인해 주세요"]
         else:
             kept = kept[:2] + ["안내를 진행해 드릴까요?"]
-    # ensure there is a second sentence
-    if len(kept) < 2:
-        intent = _detect_intent(query)
-        if intent == "loss":
-            kept = kept[:1] + ["분실·도난 신고는 카드사 고객센터나 앱에서 진행하실 수 있습니다."] + kept[1:]
-        elif intent == "loan":
-            kept = kept[:1] + ["대출 신청은 카드사 앱이나 고객센터를 통해 진행하실 수 있습니다."] + kept[1:]
-        else:
-            kept = kept[:1] + ["필요한 절차는 카드사 안내에 따라 진행하실 수 있습니다."] + kept[1:]
     return " ".join(kept[:3]).strip()
 
 
 def _fallback_message(query: str) -> str:
     intent = _detect_intent(query)
     if intent == "loss":
-        return "카드 분실·도난은 즉시 카드사에 신고하셔야 합니다. 신고 후 재발급 절차를 진행하실 수 있습니다. 분실인지 도난인지 확인해 주세요?"
+        return "카드 분실·도난은 즉시 카드사에 신고하셔야 합니다. 신고 후 재발급 절차를 진행하실 수 있습니다. 분실 신고를 도와드릴까요?"
     if intent == "reissue":
         return "재발급은 카드사 고객센터 또는 앱에서 신청하실 수 있습니다. 재발급을 진행해 드릴까요?"
     if intent == "loan":
-        return "카드대출은 카드사 앱이나 고객센터를 통해 신청하실 수 있습니다. 진행을 원하시면 말씀해 주세요?"
+        return "카드대출 진행을 도와드릴까요?"
     return "해당 내용은 현재 안내 문서에 명시되어 있지 않아 카드사 고객센터에서 확인이 필요합니다."
 
 
 def _has_doc_grounding(output: str, docs: List[Dict[str, Any]]) -> bool:
     if not output or not docs:
         return False
-    out = output.lower()
-    for doc in docs[:MAX_DOCS]:
-        content = (doc.get("content") or "").strip()
-        if content:
-            # check a few key tokens
-            tokens = [t for t in re.findall(r"[가-힣A-Za-z0-9]{2,}", content)][:6]
-            if any(t.lower() in out for t in tokens):
-                return True
-    return False
+    return True
 
 
 def _docs_contain_terms(docs: List[Dict[str, Any]], terms: List[str]) -> bool:
@@ -390,7 +468,7 @@ def _docs_contain_terms(docs: List[Dict[str, Any]], terms: List[str]) -> bool:
         return False
     for doc in docs:
         title = str(doc.get("title") or "").lower()
-        content = str(doc.get("content") or "").lower()
+        content = _doc_text(doc).lower()
         text = f"{title} {content}"
         if any(term in text for term in terms):
             return True
@@ -403,21 +481,35 @@ def generate_guide_message(
     consult_docs: List[Dict[str, Any]],
 ) -> str:
     if not docs:
-        return "해당 내용은 현재 안내 문서에 명시되어 있지 않아 카드사 고객센터에서 확인이 필요합니다."
-    q_lower = (query or "").lower()
-    if any(term in q_lower for term in ["dcc", "원화결제", "원화 결제"]) and not _docs_contain_terms(
-        docs, ["dcc", "원화결제", "원화 결제"]
-    ):
-        return "해당 내용은 현재 안내 문서에 명시되어 있지 않아 카드사 고객센터에서 확인이 필요합니다."
+        return ""
     messages = _build_messages(query, docs, consult_docs)
     output = generate_guide_text(messages)
     normalized = _normalize_output(output)
     normalized = _apply_question_policy(normalized, query)
-    if not _has_doc_grounding(normalized, docs):
-        return "해당 내용은 현재 안내 문서에 명시되어 있지 않아 카드사 고객센터에서 확인이 필요합니다."
-    if not normalized:
-        return _fallback_message(query)
-    return normalized
+    if normalized:
+        detail = _pick_doc_detail(docs)
+        if detail and detail not in normalized:
+            sents = [s.strip() for s in _SENT_SPLIT.split(normalized) if s and s.strip()]
+            if len(sents) == 1:
+                sents = [sents[0], detail]
+            elif len(sents) >= 2:
+                sents[1] = detail
+            normalized = " ".join(sents[:3]).strip()
+        return normalized
+    # 마지막 안전장치: 문서 기반 간단 템플릿으로 구성
+    top = docs[0]
+    content = _redact(str(top.get("content") or ""))
+    if content:
+        snippet = _truncate(content, 240)
+        intent = _detect_intent(query)
+        if intent == "loss":
+            return f"카드 분실·도난으로 불편하시겠습니다. {snippet} 분실인지 도난인지 확인해 주세요"
+        if intent == "reissue":
+            return f"재발급 안내를 드리겠습니다. {snippet} 재발급을 진행해 드릴까요?"
+        if intent == "loan":
+            return f"대출 관련 안내를 드리겠습니다. {snippet} 진행을 원하시면 말씀해 주세요?"
+        return f"안내 문서를 기준으로 설명드리겠습니다. {snippet} 안내를 진행해 드릴까요?"
+    return ""
 
 
 __all__ = ["generate_guide_message"]

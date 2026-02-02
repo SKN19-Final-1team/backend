@@ -32,6 +32,115 @@ def _compact_text(text: str) -> str:
     return _normalize_text(text).replace(" ", "").replace("-", "")
 
 
+def post_filter_docs(query: str, docs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    if not docs:
+        return docs
+    q = _normalize_text(query)
+    qc = _compact_text(query)
+
+    def _doc_text(doc: Dict[str, Any]) -> str:
+        title = str(doc.get("title") or "")
+        content = str(doc.get("content") or "")
+        return f"{title} {content}".lower()
+
+    loss_terms = ("분실", "도난", "잃어버", "분실신고")
+    loan_terms = ("대출", "현금서비스", "카드대출", "리볼빙", "이자", "수수료")
+    dcc_terms = ("dcc", "원화결제", "원화 결제", "해외 원화")
+    apple_terms = ("애플페이", "applepay", "apple pay")
+    samsung_terms = ("삼성페이", "samsungpay", "samsung pay")
+    kakao_terms = ("카카오페이", "kakaopay", "kakao pay")
+    tmoney_terms = ("티머니", "tmoney", "t-money", "교통카드")
+
+    loss_ids = {
+        "narasarang_faq_005",
+        "narasarang_faq_006",
+        "카드분실_도난_관련피해_예방_및_대응방법_merged",
+    }
+    loan_ids = {
+        "카드대출 예약신청_merged",
+        "카드상품별_거래조건_이자율__수수료_등__merged",
+        "sinhan_terms_credit_신용카드_개인회원_약관_039",
+        "sinhan_terms_credit_신용카드_개인회원_약관_040",
+    }
+
+    def _filter_by_terms(terms: tuple[str, ...], id_whitelist: set[str]) -> List[Dict[str, Any]]:
+        filtered: List[Dict[str, Any]] = []
+        for doc in docs:
+            doc_id = str(doc.get("id") or doc.get("db_id") or "")
+            text = _doc_text(doc)
+            if doc_id in id_whitelist or any(t in text for t in terms):
+                filtered.append(doc)
+        return filtered
+
+    # loss intent
+    if any(t in q for t in loss_terms):
+        filtered = _filter_by_terms(loss_terms, loss_ids)
+        if "나라사랑" in q:
+            filtered = [
+                d
+                for d in filtered
+                if "narasarang" in str(d.get("id") or d.get("db_id") or "").lower()
+                or "나라사랑" in _doc_text(d)
+                or str(d.get("id") or d.get("db_id") or "") in loss_ids
+            ] or filtered
+        if filtered:
+            docs = filtered
+        for doc in docs:
+            doc_id = str(doc.get("id") or doc.get("db_id") or "")
+            if doc_id == "narasarang_faq_005":
+                doc["score"] = float(doc.get("score") or 0.0) + 2.0
+            elif doc_id in loss_ids:
+                doc["score"] = float(doc.get("score") or 0.0) + 1.0
+            elif "나라사랑" in q and "narasarang" in doc_id.lower():
+                doc["score"] = float(doc.get("score") or 0.0) + 0.5
+
+    # reissue intent (나라사랑 재발급 문서 상단 고정)
+    if "나라사랑" in q and any(t in q for t in ("재발급", "재발행")):
+        for doc in docs:
+            doc_id = str(doc.get("id") or doc.get("db_id") or "")
+            if doc_id == "narasarang_faq_006":
+                doc["score"] = float(doc.get("score") or 0.0) + 2.0
+
+    # loan intent
+    if any(t in q for t in loan_terms):
+        filtered = _filter_by_terms(loan_terms, loan_ids)
+        if filtered:
+            docs = filtered
+        for doc in docs:
+            doc_id = str(doc.get("id") or doc.get("db_id") or "")
+            if doc_id in loan_ids:
+                doc["score"] = float(doc.get("score") or 0.0) + 1.0
+
+    # payment intents
+    if any(t in q for t in apple_terms):
+        filtered = [
+            d
+            for d in docs
+            if "hyundai_applepay" in str(d.get("id") or d.get("db_id") or "").lower()
+            or any(t in _doc_text(d) for t in apple_terms)
+        ]
+        if filtered:
+            docs = filtered
+    if any(t in q for t in samsung_terms):
+        filtered = [d for d in docs if any(t in _doc_text(d) for t in samsung_terms)]
+        if filtered:
+            docs = filtered
+    if any(t in q for t in kakao_terms):
+        filtered = [d for d in docs if any(t in _doc_text(d) for t in kakao_terms)]
+        if filtered:
+            docs = filtered
+    if any(t in q or t in qc for t in tmoney_terms):
+        filtered = [d for d in docs if "티머니" in _doc_text(d) or "tmoney" in _doc_text(d)]
+        if filtered:
+            docs = filtered
+    if any(t in q for t in dcc_terms):
+        filtered = [d for d in docs if any(t in _doc_text(d) for t in dcc_terms)]
+        if filtered:
+            docs = filtered
+
+    return docs
+
+
 def _card_group_key(doc: Dict[str, Any]) -> str:
     meta = doc.get("metadata") or {}
     card_name = meta.get("card_name") or meta.get("original_card_name") or doc.get("title") or ""
@@ -407,6 +516,9 @@ async def retrieve_docs(
     if any(term in normalized_query for term in loan_terms + loss_terms_query):
         filtered = [doc for doc in retrieved_docs if not _is_kpass_doc(doc)]
         retrieved_docs = filtered or retrieved_docs
+
+    if route_name == "card_usage":
+        retrieved_docs = post_filter_docs(query, retrieved_docs)
 
     # ensure score is numeric and sort by score desc
     for doc in retrieved_docs:

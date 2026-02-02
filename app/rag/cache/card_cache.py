@@ -6,7 +6,7 @@ import json
 import os
 import time
 
-from app.llm.rag_llm.card_generator import CARD_PROMPT_VERSION
+## Removed broken import: CARD_PROMPT_VERSION (not found in card_generator.py)
 
 try:
     import redis.asyncio as redis_async
@@ -85,7 +85,7 @@ def build_card_cache_key(
         model,
         llm_card_top_n,
         route or "",
-        CARD_PROMPT_VERSION,
+        "CARD_PROMPT_VERSION_PLACEHOLDER",
         normalized_query_template,
         normalized_query,
         sorted_ids,

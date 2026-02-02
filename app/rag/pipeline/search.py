@@ -12,7 +12,12 @@ from app.rag.cache.retrieval_cache import (
     retrieval_cache_get,
     retrieval_cache_set,
 )
-from app.rag.pipeline.retrieve import retrieve_consult_cases, retrieve_docs, retrieve_docs_card_info
+from app.rag.pipeline.retrieve import (
+    post_filter_docs,
+    retrieve_consult_cases,
+    retrieve_docs,
+    retrieve_docs_card_info,
+)
 from app.rag.pipeline.utils import (
     apply_session_context,
     build_retrieve_cache_entries,
@@ -219,6 +224,8 @@ async def run_search(
     if any(term in normalized_query for term in ("분실", "도난", "잃어버", "대출", "현금서비스", "카드대출", "리볼빙")):
         filtered_docs = [doc for doc in docs if not _is_kpass_doc(doc)]
         docs = filtered_docs or docs
+    if (routing.get("route") or routing.get("ui_route")) == "card_usage":
+        docs = post_filter_docs(query, docs)
     for doc in docs:
         if not isinstance(doc.get("score"), (int, float)):
             doc["score"] = 0.0
