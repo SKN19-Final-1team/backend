@@ -33,7 +33,7 @@ _BOOST_GUIDE_TOKENS = tuple(
     token.strip()
     for token in os.getenv(
         "RAG_RRF_BOOST_GUIDE_TOKENS",
-        "다자녀,신청,방법,대상,서류,등록,인증,환급,혜택,적립",
+        "다자녀,신청,방법,대상,서류,등록,인증,환급,혜택,적립,분실,도난,재발급,잃어버",
     ).split(",")
     if token.strip()
 )
@@ -80,7 +80,7 @@ def _content_match_score(content: str, terms: List[str], weight: int) -> int:
 def _card_meta_score(metadata: Dict[str, object], card_values: List[str]) -> int:
     if not card_values:
         return 0
-    card_name = metadata.get("card_name")
+    card_name = metadata.get("card_name") or metadata.get("original_card_name") or metadata.get("name")
     if not card_name:
         return 0
     card_name_str = str(card_name)
@@ -157,6 +157,14 @@ def _doc_has_token(doc: Dict[str, object], tokens: List[str]) -> bool:
     return False
 
 
+def _has_loss_term(text: str) -> bool:
+    return any(term in text for term in ("분실", "도난", "잃어버"))
+
+
+def _has_kpass_term(text: str) -> bool:
+    return "k패스" in text or "k-패스" in text
+
+
 def _extra_boost_for_filters(doc: Dict[str, object], context: SearchContext) -> float:
     boost = 0.0
     meta = doc.get("metadata") or {}
@@ -193,11 +201,27 @@ def _demotion_for_noise(doc: Dict[str, object], context: SearchContext) -> float
     issue_terms = {"결제", "승인", "오류", "실패", "안돼", "안됨", "거절"}
     reissue_terms = {"재발급", "분실", "도난", "고객센터", "전화번호", "연락처"}
     benefit_terms = {"혜택", "연회비", "발급", "다자녀", "지역", "경기", "충남", "통신", "한도", "실적"}
+    loan_terms = {"대출", "현금서비스", "리볼빙", "카드대출"}
 
     if query_terms & issue_terms and any(term in text for term in reissue_terms):
         penalty -= 0.15
     if query_terms & {"분실", "도난", "잃어버"} and any(term in text for term in benefit_terms):
         penalty -= 0.15
+    if query_terms & {"분실", "도난", "잃어버"} and not _has_loss_term(text):
+        penalty -= 0.2
+    if query_terms & {"분실", "도난", "잃어버"} and "발급" in text and not _has_loss_term(text):
+        penalty -= 0.15
+    if query_terms & {"분실", "도난", "잃어버"} and "나라사랑카드란" in text:
+        penalty -= 0.25
+    if query_terms & loan_terms and ("k패스" in text or "k-패스" in text):
+        penalty -= 0.25
+    if query_terms & {"분실", "도난", "잃어버"} and ("k패스" in text or "k-패스" in text):
+        penalty -= 0.25
+    if query_terms & {"분실", "도난", "잃어버"} and not any(
+        term in " ".join(query_terms) for term in ["gift", "기프트", "선불", "테디"]
+    ):
+        if any(term in text for term in ["gift", "기프트", "선불", "테디카드"]):
+            penalty -= 0.25
     query_compact = "".join(query_terms)
     if "k패스" not in query_compact and ("k패스" in text or "k-패스" in text):
         if context.route_name == "card_usage":
@@ -332,6 +356,8 @@ def _score_candidate(
             if any(t and t in norm_card_values for t in norm_terms):
                 card_meta_score += 3
     boost_score = 0.0
+    loss_query_text = any(term in (context.query_text or "").lower() for term in ("분실", "도난", "잃어버"))
+    doc_text_lower = f"{(title or '')} {content}".lower()
     if _BOOST_ENABLED:
         guide_tokens = _guide_tokens(context)
         is_guide_doc = _is_guide_table(str(doc.get("table")))
@@ -382,9 +408,32 @@ def _score_candidate(
                         match_count = _count_term_matches(doc, context.query_terms)
                         if match_count >= 2:
                             boost_score += _BOOST_GUIDE_COVERAGE * match_count
+            if context.query_terms and is_guide_doc:
+                loss_query = any(term in {"분실", "도난", "잃어버"} for term in context.query_terms)
+                if loss_query:
+                    if _has_loss_term(f"{title or ''} {content}".lower()):
+                        boost_score += 0.25
+                    else:
+                        boost_score -= 0.15
+            if is_guide_doc and context.card_values:
+                loss_query = any(term in {"분실", "도난", "잃어버"} for term in context.query_terms)
+                if loss_query and _has_loss_term(f"{title or ''} {content}".lower()):
+                    boost_score += 0.35
             if guide_tokens and not is_guide_doc and context.card_values and card_match_base:
                 boost_score -= _PENALTY_CARD_GUIDE
             boost_score += _extra_boost_for_filters(doc, context)
+    # loss query boost/penalty regardless of RRF boost setting
+    if loss_query_text and _is_guide_table(str(doc.get("table"))):
+        if _has_loss_term(doc_text_lower):
+            boost_score += 0.35
+        else:
+            boost_score -= 0.2
+        # loss query + card name match should surface loss docs above generic card info
+        if context.card_values and _has_loss_term(doc_text_lower):
+            meta = doc.get("metadata") or {}
+            card_name = str(meta.get("card_name") or meta.get("original_card_name") or "")
+            if card_name and card_name.replace(" ", "") in (context.query_text or "").replace(" ", ""):
+                boost_score += 0.5
     doc["rrf_boost"] = boost_score
     # 카드명 매칭이 있는 카드 상품은 card_info 시나리오에서 밀리지 않도록 추가 보너스
     if context.card_values and str(doc.get("table")) == "card_products" and card_match_base:
@@ -478,6 +527,8 @@ def _finalize_candidates(
     key_fn,
     context: SearchContext,
 ) -> List[Dict[str, object]]:
+    loan_terms = {"대출", "현금서비스", "리볼빙", "카드대출"}
+    loss_terms = {"분실", "도난", "잃어버"}
     candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
     has_card_match = any(doc.get("card_match") for _, _, doc in candidates)
     if has_card_match:
@@ -490,6 +541,30 @@ def _finalize_candidates(
         else:
             candidates = [item for item in candidates if item[2].get("card_match")]
 
+    query_text_lower = (context.query_text or "").lower()
+    loan_in_query = any(term in query_text_lower for term in loan_terms)
+    if context.query_terms and loan_terms & set(context.query_terms or []) or loan_in_query:
+        filtered: List[Tuple[float, int, Dict[str, object]]] = []
+        for item in candidates:
+            doc = item[2]
+            title = (doc.get("title") or "").lower()
+            content = (doc.get("content") or "").lower()
+            if _has_kpass_term(f"{title} {content}"):
+                continue
+            filtered.append(item)
+        candidates = filtered or candidates
+    loss_in_query = any(term in query_text_lower for term in loss_terms)
+    if context.query_terms and loss_terms & set(context.query_terms or []) or loss_in_query:
+        filtered = []
+        for item in candidates:
+            doc = item[2]
+            title = (doc.get("title") or "").lower()
+            content = (doc.get("content") or "").lower()
+            if _has_kpass_term(f"{title} {content}"):
+                continue
+            filtered.append(item)
+        candidates = filtered or candidates
+
     best_by_title: Dict[str, Tuple[Tuple[int, float], Dict[str, object]]] = {}
     for final_score, _, doc in candidates:
         key = key_fn(doc)
@@ -501,4 +576,7 @@ def _finalize_candidates(
 
     docs = [item[1] for item in best_by_title.values()]
     docs.sort(key=lambda item: (item.get("score", 0.0), item.get("title_score", 0)), reverse=True)
+    for doc in docs:
+        if not isinstance(doc.get("score"), (int, float)):
+            doc["score"] = 0.0
     return docs
