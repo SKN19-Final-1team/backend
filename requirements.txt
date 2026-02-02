@@ -107,6 +107,7 @@ propcache==0.4.1
 protobuf==6.33.3
 psycopg2-binary==2.9.11
 pyahocorasick==2.3.0
+PyAudio==0.2.14
 pycparser==2.23
 pydantic==2.12.5
 pydantic-settings==2.12.0
