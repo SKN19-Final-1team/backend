@@ -81,6 +81,54 @@ INFO_HINT_TERMS = {
     "괜찮", "정보", "소개", "어떤", "뭐가",
 }
 
+# 결제수단 약칭 매핑 (문맥 기반 확장용)
+PAYMENT_ABBREVIATIONS = {
+    "네이버": "네이버페이",
+    "카카오": "카카오페이",
+    "삼성": "삼성페이",
+    "애플": "애플페이",
+}
+
+# 결제 문맥 패턴 (정규식)
+PAYMENT_CONTEXT_PATTERNS = [
+    re.compile(r'(네이버|카카오|삼성|애플)\s*(쓸|쓴|결제|등록|추가|넣)'),
+    re.compile(r'(네이버|카카오|삼성|애플)\s*때'),
+    re.compile(r'(네이버|카카오|삼성|애플)에서'),
+]
+
+# 구어체-전문용어 매핑 (액션) - Phase 2 확장 (15개 패턴)
+COLLOQUIAL_ACTION_MAP = {
+    r'잃어버렸|잃어버려|잃었': '분실',
+    r'막아\s*주|정지\s*시켜': '분실신고',
+    r'없애\s*주|안\s*쓸|그만\s*쓸': '해지',
+    r'튕|안\s*먹혀|안\s*돼|작동\s*안': '오류',
+    r'넣으려|깔아야|추가\s*하려|등록\s*하려': '등록',
+    r'만들|새로\s*발급|추가\s*발급': '발급',
+    r'기간\s*다\s*됐|만료\s*됐|유효기간': '만료',
+    r'갱신|연장': '갱신',
+    r'변경|바꾸': '변경',
+    r'확인|조회': '조회',
+    r'정산|청구|납부': '정산',
+    r'환불|돌려': '환불',
+    r'정지|중지': '정지',
+    r'해외.*결제|외국.*결제': '해외결제',
+    r'승인|거래': '승인',
+}
+
+# 구어체-전문용어 매핑 (의도) - Phase 2 신규 (10개 패턴)
+QUESTION_INTENT_PATTERNS = {
+    r'뭐가\s*좋|어떤\s*혜택|좋은\s*거': '혜택',
+    r'(1년|년간|연간).*얼마': '연회비',
+    r'얼마나\s*(깎|할인)': '할인',
+    r'돈\s*모으|쌓|적립': '적립',
+    r'추천|좋은\s*카드': '추천',
+    r'비교|차이': '비교',
+    r'조건|자격': '조건',
+    r'캐시백|환급': '캐시백',
+    r'포인트|리워드': '포인트',
+    r'마일리지': '마일리지',
+}
+
 # 불용어
 STOPWORDS = {
     "체크", "신용", "card", "check",  # "카드" 제거됨
@@ -348,26 +396,49 @@ class KeywordExtractor:
                 if action not in actions:
                     actions.append(action)
 
+        # 구어체 패턴 매칭 (예: "잃어버렸어요" → "분실")
+        for pattern, canonical in COLLOQUIAL_ACTION_MAP.items():
+            if re.search(pattern, text):
+                if canonical not in actions:
+                    actions.append(canonical)
+
         return actions
 
     def _extract_payments(self, text: str) -> List[str]:
-        """결제수단 추출"""
+        """결제수단 추출 (약칭 확장 포함)"""
         payments = []
         text_normalized = text.replace(" ", "").lower()
 
-        # 결제수단 키워드 매칭
+        # Tier 1: 정확한 결제수단 키워드 매칭
         for variant, canonical in self._payment_keywords.items():
             if variant in text_normalized:
                 if canonical not in payments:
                     payments.append(canonical)
 
+        # Tier 2: 문맥 기반 약칭 확장 (예: "네이버" → "네이버페이")
+        for abbrev, full_name in PAYMENT_ABBREVIATIONS.items():
+            # 이미 정확한 매칭으로 발견됨
+            if full_name in payments:
+                continue
+
+            # 약칭이 텍스트에 있는지 확인
+            abbrev_in_text = abbrev in text or abbrev.lower() in text_normalized
+
+            if abbrev_in_text:
+                # 결제 관련 문맥이 있는지 확인
+                for context_pattern in PAYMENT_CONTEXT_PATTERNS:
+                    if context_pattern.search(text):
+                        if full_name not in payments:
+                            payments.append(full_name)
+                        break  # 하나의 문맥 패턴만 매칭되면 충분
+
         return payments
 
     def _extract_intents(self, text: str) -> List[str]:
-        """의도 키워드 추출"""
+        """의도 키워드 추출 (Tier 1: 형태소 분석 + Tier 2: 질문 패턴 매칭)"""
         intents = []
 
-        # 형태소 분석으로 명사 추출
+        # Tier 1: 형태소 분석으로 명사 추출
         tokens = set()
         if MORPHOLOGY_AVAILABLE:
             try:
@@ -385,6 +456,12 @@ class KeywordExtractor:
             if token_clean in self._intent_keywords:
                 canonical = self._intent_keywords[token_clean]
                 if canonical not in intents and canonical not in STOPWORDS:
+                    intents.append(canonical)
+
+        # Tier 2: 질문 패턴 매칭 (Phase 2 추가)
+        for pattern, canonical in QUESTION_INTENT_PATTERNS.items():
+            if re.search(pattern, text):
+                if canonical not in intents:
                     intents.append(canonical)
 
         return intents
