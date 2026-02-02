@@ -17,7 +17,7 @@ async def get_personality(script):
         start = time.perf_counter()
         
         response = await client.chat.completions.create(
-            model="ansui/customer-analysis-merged",
+            model="ansui/kanana-customer-analysis-merged",
             messages=[
                 {"role": "system", "content": PERSONALITY_SYSTEM_PROMPT},
                 {"role": "user", "content": script}
