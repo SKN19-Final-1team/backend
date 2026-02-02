@@ -81,6 +81,30 @@ INFO_HINT_TERMS = {
     "괜찮", "정보", "소개", "어떤", "뭐가",
 }
 
+# 결제수단 약칭 매핑 (문맥 기반 확장용)
+PAYMENT_ABBREVIATIONS = {
+    "네이버": "네이버페이",
+    "카카오": "카카오페이",
+    "삼성": "삼성페이",
+    "애플": "애플페이",
+}
+
+# 결제 문맥 패턴 (정규식)
+PAYMENT_CONTEXT_PATTERNS = [
+    re.compile(r'(네이버|카카오|삼성|애플)\s*(쓸|쓴|결제|등록|추가|넣)'),
+    re.compile(r'(네이버|카카오|삼성|애플)\s*때'),
+    re.compile(r'(네이버|카카오|삼성|애플)에서'),
+]
+
+# 구어체-전문용어 매핑 (액션)
+COLLOQUIAL_ACTION_MAP = {
+    r'잃어버렸|잃어버려|잃었': '분실',
+    r'막아\s*주|정지\s*시켜': '분실신고',
+    r'없애\s*주|안\s*쓸': '해지',
+    r'튕|안\s*먹혀|안\s*돼': '오류',
+    r'넣으려|깔아야': '등록',
+}
+
 # 불용어
 STOPWORDS = {
     "체크", "신용", "card", "check",  # "카드" 제거됨
@@ -348,18 +372,41 @@ class KeywordExtractor:
                 if action not in actions:
                     actions.append(action)
 
+        # 구어체 패턴 매칭 (예: "잃어버렸어요" → "분실")
+        for pattern, canonical in COLLOQUIAL_ACTION_MAP.items():
+            if re.search(pattern, text):
+                if canonical not in actions:
+                    actions.append(canonical)
+
         return actions
 
     def _extract_payments(self, text: str) -> List[str]:
-        """결제수단 추출"""
+        """결제수단 추출 (약칭 확장 포함)"""
         payments = []
         text_normalized = text.replace(" ", "").lower()
 
-        # 결제수단 키워드 매칭
+        # Tier 1: 정확한 결제수단 키워드 매칭
         for variant, canonical in self._payment_keywords.items():
             if variant in text_normalized:
                 if canonical not in payments:
                     payments.append(canonical)
+
+        # Tier 2: 문맥 기반 약칭 확장 (예: "네이버" → "네이버페이")
+        for abbrev, full_name in PAYMENT_ABBREVIATIONS.items():
+            # 이미 정확한 매칭으로 발견됨
+            if full_name in payments:
+                continue
+
+            # 약칭이 텍스트에 있는지 확인
+            abbrev_in_text = abbrev in text or abbrev.lower() in text_normalized
+
+            if abbrev_in_text:
+                # 결제 관련 문맥이 있는지 확인
+                for context_pattern in PAYMENT_CONTEXT_PATTERNS:
+                    if context_pattern.search(text):
+                        if full_name not in payments:
+                            payments.append(full_name)
+                        break  # 하나의 문맥 패턴만 매칭되면 충분
 
         return payments
 

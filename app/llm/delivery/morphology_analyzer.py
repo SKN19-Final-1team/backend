@@ -317,42 +317,171 @@ def get_correction_map() -> dict:
     return _correction_map_cache
 
 
-def apply_text_corrections(text: str) -> str:
+def _find_protected_terms(text: str) -> List[Tuple[str, int, int]]:
     """
-    텍스트 레벨에서 STT 오류 교정 적용
-    
-    correction_map의 오류 패턴을 교정된 형태로 치환
-    
+    보정에서 보호해야 할 용어(카드명 등) 찾기
+
     Args:
         text: 입력 텍스트
-        
+
+    Returns:
+        List of (term, start_pos, end_pos) tuples
+
+    Example:
+        >>> _find_protected_terms("국민행복카드 신청하려구요")
+        [('국민행복카드', 0, 6)]
+    """
+    from app.llm.delivery.vocabulary_matcher import load_card_products
+    import re
+
+    protected = []
+
+    # DB에서 카드상품명 로드
+    products = load_card_products()
+
+    # 긴 카드명부터 매칭 (부분 문자열 충돌 방지)
+    card_names = sorted([p["keyword"] for p in products], key=len, reverse=True)
+
+    for card_name in card_names:
+        # 대소문자 구분 없이 검색
+        pattern = re.compile(re.escape(card_name), re.IGNORECASE)
+        for match in pattern.finditer(text):
+            protected.append((match.group(), match.start(), match.end()))
+
+    # 겹치는 매칭 제거 (긴 것 우선)
+    protected = _remove_overlaps(protected)
+    return protected
+
+
+def _remove_overlaps(terms: List[Tuple[str, int, int]]) -> List[Tuple[str, int, int]]:
+    """
+    겹치는 텀 제거 (긴 매칭 우선)
+
+    Args:
+        terms: List of (term, start, end) tuples
+
+    Returns:
+        Filtered list with no overlaps
+    """
+    if not terms:
+        return []
+
+    # 시작 위치로 정렬, 같으면 길이 긴 것 우선
+    sorted_terms = sorted(terms, key=lambda x: (x[1], -(x[2] - x[1])))
+
+    result = []
+    last_end = -1
+
+    for term, start, end in sorted_terms:
+        if start >= last_end:  # 겹치지 않음
+            result.append((term, start, end))
+            last_end = end
+
+    return result
+
+
+def _protect_terms(text: str, terms: List[Tuple[str, int, int]]) -> Tuple[str, Dict[str, str]]:
+    """
+    보호 용어를 플레이스홀더로 치환
+
+    Args:
+        text: 원본 텍스트
+        terms: 보호할 용어 리스트 (term, start, end)
+
+    Returns:
+        (플레이스홀더로 치환된 텍스트, {플레이스홀더: 원본} 매핑)
+
+    Example:
+        >>> _protect_terms("국민행복카드 신청", [('국민행복카드', 0, 6)])
+        ('__PROTECTED_0__ 신청', {'__PROTECTED_0__': '국민행복카드'})
+    """
+    placeholders = {}
+    result = text
+    offset = 0
+
+    for i, (term, start, end) in enumerate(terms):
+        placeholder = f"__PROTECTED_{i}__"
+        placeholders[placeholder] = term
+
+        # 이전 치환으로 인한 위치 조정
+        adj_start = start + offset
+        adj_end = end + offset
+
+        result = result[:adj_start] + placeholder + result[adj_end:]
+        offset += len(placeholder) - (end - start)
+
+    return result, placeholders
+
+
+def _restore_terms(text: str, placeholders: Dict[str, str]) -> str:
+    """
+    플레이스홀더를 원본 용어로 복원
+
+    Args:
+        text: 플레이스홀더가 포함된 텍스트
+        placeholders: {플레이스홀더: 원본} 매핑
+
+    Returns:
+        복원된 텍스트
+
+    Example:
+        >>> _restore_terms("__PROTECTED_0__ 신청", {'__PROTECTED_0__': '국민행복카드'})
+        '국민행복카드 신청'
+    """
+    result = text
+    for placeholder, original in placeholders.items():
+        result = result.replace(placeholder, original)
+    return result
+
+
+def apply_text_corrections(text: str) -> str:
+    """
+    텍스트 레벨에서 STT 오류 교정 적용 (중복 보정 방지)
+
+    correction_map의 오류 패턴을 교정된 형태로 치환하되,
+    카드명 등 보호 대상 용어는 중복 보정하지 않음
+
+    Args:
+        text: 입력 텍스트
+
     Returns:
         교정된 텍스트
-        
+
     Example:
         >>> apply_text_corrections("하나낸 계좌에서 연예비 납부")
         "하나은행 계좌에서 연회비 납부"
+
+        >>> apply_text_corrections("국민행복카드 신청하려구요")
+        "국민행복카드 신청하려구요"  # "국민행복카드카드" 방지
     """
     correction_map = get_correction_map()
-    
+
     if not correction_map:
         return text
-    
-    result = text
-    
+
+    # STEP 1: 정확한 카드명 등 보호 대상 찾기
+    protected_terms = _find_protected_terms(text)
+
+    # STEP 2: 보호 용어를 플레이스홀더로 치환
+    text_with_placeholders, placeholders = _protect_terms(text, protected_terms)
+
+    # STEP 3: 교정 적용 (플레이스홀더 부분은 교정 안 됨)
+    result = text_with_placeholders
+
     # 긴 패턴부터 먼저 교정 (겹침 방지)
     sorted_patterns = sorted(correction_map.items(), key=lambda x: len(x[0]), reverse=True)
-    
+
     for error_form, correct_form in sorted_patterns:
-        # 같은 단어면 스킵
+        # 같은 단어면 스킵 (자기 자신 매핑 제거)
         if error_form == correct_form:
             continue
-        
+
         # 텍스트에 오류 패턴이 있으면 교정
         if error_form in result:
             result = result.replace(error_form, correct_form)
-    
-    return result
+
+    # STEP 4: 플레이스홀더를 원래 용어로 복원
+    return _restore_terms(result, placeholders)
 
 
 def extract_nouns(text: str) -> List[str]:
