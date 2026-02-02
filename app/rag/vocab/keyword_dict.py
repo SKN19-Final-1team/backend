@@ -37,10 +37,10 @@ APPLEPAY_INTENT_SYNONYMS: Dict[str, List[str]] = {
 # 결제 수단 관련 키워드 (사전에서 누락된 항목 보완)
 PAYMENT_SYNONYMS: Dict[str, List[str]] = {
     "iM유페이": ["iM 유페이", "iM유 페이", "im유페이"],
-    "네이버페이": ["naver pay", "네이버 페이"],
-    "삼성페이": ["samsung pay", "삼성 페이"],
-    "애플페이": ["apple pay", "applepay", "애플 페이"],
-    "카카오페이": ["kakao pay", "카카오 페이"],
+    "네이버페이": ["naver pay", "네이버 페이", "네이버"],  # Phase 2: 약칭 추가
+    "삼성페이": ["samsung pay", "삼성 페이", "삼성"],    # Phase 2: 약칭 추가
+    "애플페이": ["apple pay", "applepay", "애플 페이", "애플"],  # Phase 2: 약칭 추가
+    "카카오페이": ["kakao pay", "카카오 페이", "카카오"],  # Phase 2: 약칭 추가
     "티머니": ["t-money", "tmoney", "t머니", "티 머니"],
 }
 PAYMENT_ALLOWLIST = set(PAYMENT_SYNONYMS.keys())
