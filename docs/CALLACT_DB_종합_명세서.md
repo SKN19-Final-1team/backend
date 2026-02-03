@@ -1,11 +1,11 @@
 # CALL:ACT DB 종합 명세서
 
 ## 메타데이터
-- **작성일**: 2026-01-26
+- **작성일**: 2026-02-03
 - **작성자**: CALL:ACT Team
-- **버전**: v1.0
+- **버전**: v2.0
 - **상태**: 완료
-- **관련 문서**: [통합 DB 설정 가이드 v3.0](./통합_DB_설정_가이드_v3.0.md), [SETUP.md](./SETUP.md)
+- **관련 문서**: [통합 DB 설정 가이드 v3.0](./통합_DB_설정_가이드_v3.0.md), [SETUP.md](./SETUP.md), [DB Mock 데이터 가이드](./DB_Mock_Data_Guide.md)
 
 ---
 
@@ -89,12 +89,20 @@ CALL:ACT는 카드사 콜센터 상담사를 위한 실시간 상담 지원 + �
 | fcr | BOOLEAN | FCR 여부 (7일 이내 동일 카테고리 재문의 = FALSE) |
 | processing_timeline | JSONB | 처리 타임라인 |
 | transcript | TEXT | 전체 녹취록 (마스킹 처리 완료) |
+| acw_duration | INTEGER | 후처리 시간 (30-300초) |
+| ai_summary | TEXT | AI 생성 요약 |
+| feedback_text | TEXT | 고객 피드백 텍스트 (~60%) |
+| feedback_emotions | TEXT[] | 감정 태그 배열 (~60%) |
+| follow_up_schedule | JSONB | 후속 조치 일정 (~20%) |
+| transfer_department | VARCHAR(50) | 이관 부서 (~5%) |
+| transfer_notes | TEXT | 이관 사유 (~5%) |
 | created_at | TIMESTAMP | 생성일 |
 | updated_at | TIMESTAMP | 수정일 |
 
 - **데이터 건수**: 6,533건
 - **인덱스**: agent_id, customer_id, call_date, category_raw, category_main, emotion, status
 - **비고**: 하나카드 상담 데이터를 테디카드 맥락으로 변환하여 적재. 마스킹 태그(`[카드사명#1]` 등)를 `테디카드`, `테디페이`로 치환.
+- **확장 필드**: `01b_populate_mock_data.py`로 채움 (acw_duration, ai_summary, feedback 등)
 
 #### consultation_documents (상담 문서 + 임베딩)
 
@@ -111,12 +119,16 @@ CALL:ACT는 카드사 콜센터 상담사를 위한 실시간 상담 지원 + �
 | metadata | JSONB | 메타데이터 |
 | quality | quality_rating | 품질 |
 | structured | JSONB | 구조화 데이터 |
+| usage_count | INTEGER | 참조 횟수 (0-100) |
+| effectiveness_score | DECIMAL(3,2) | 효과성 점수 (0.00-1.00) |
+| last_used | TIMESTAMP | 마지막 참조일 |
 | created_at | TIMESTAMP | 생성일 |
 | updated_at | TIMESTAMP | 수정일 |
 
 - **데이터 건수**: 6,533건 (consultations와 1:1 매핑)
 - **인덱스**: consultation_id, category, HNSW 임베딩 인덱스 (cosine)
 - **비고**: pgvector의 HNSW 인덱스를 사용하여 RAG 유사도 검색 지원.
+- **확장 필드**: `01b_populate_mock_data.py`로 채움 (usage_count, effectiveness_score, last_used)
 
 #### category_mappings (카테고리 매핑)
 
@@ -168,8 +180,8 @@ CALL:ACT는 카드사 콜센터 상담사를 위한 실시간 상담 지원 + �
 | card_brand | VARCHAR(30) | 카드 브랜드 |
 | card_issue_date | DATE | 카드 발급일 |
 | card_expiry_date | DATE | 카드 만료일 |
-| current_type_code | VARCHAR(10) | 현재 페르소나 코드 (N1~N4, S1~S8) |
-| type_history | JSONB | 페르소나 이력 |
+| current_type_code | VARCHAR(10) | 현재 페르소나 코드 (N1, N2, S1, S2, S3) |
+| type_history | JSONB | 페르소나 이력 (최근 3건, consultation_id 포함) |
 | personality_tags | TEXT[] | 성격 태그 배열 |
 | communication_style | JSONB | 커뮤니케이션 스타일 |
 | customer_type_codes | TEXT[] | 고객 유형 코드 배열 |
@@ -188,7 +200,7 @@ CALL:ACT는 카드사 콜센터 상담사를 위한 실시간 상담 지원 + �
 
 | 컬럼 | 타입 | 설명 |
 |------|------|------|
-| type_code | VARCHAR(10) PK | 유형 코드 (N1~N4, S1~S8) |
+| type_code | VARCHAR(10) PK | 유형 코드 (N1, N2, S1, S2, S3) |
 | type_name | VARCHAR(50) | 유형명 |
 | description | TEXT | 설명 |
 | communication_tips | TEXT | 커뮤니케이션 팁 |
@@ -196,23 +208,32 @@ CALL:ACT는 카드사 콜센터 상담사를 위한 실시간 상담 지원 + �
 | created_at | TIMESTAMP | 생성일 |
 | updated_at | TIMESTAMP | 수정일 |
 
-- **데이터 건수**: 12개 유형
+- **데이터 건수**: 5개 유형 (활성)
 - **유형 목록**:
 
-| 코드 | 유형명 | 설명 |
-|------|--------|------|
-| N1 | 일반친절형 | 일반적인 응대, 친절한 안내 선호 |
-| N2 | 조용한내성형 | 간결한 답변 선호, 불필요한 대화 최소화 |
-| N3 | 실용주의형 | 목적 지향적, 해결책 먼저 제시 |
-| N4 | 친화적수다형 | 대화를 즐기는 고객, 친근한 응대 |
-| S1 | 급한성격형 | 빠른 답변 선호, 간결한 핵심 전달 |
-| S2 | 꼼꼼상세형 | 상세한 설명 필요, 차근차근 안내 |
-| S3 | 감정호소형 | 경청·공감 후 해결책 제시 |
-| S4 | 시니어친화형 | 쉬운 용어, 천천히 반복 안내 |
-| S5 | 디지털네이티브 | 앱/웹 셀프서비스 경로 우선 안내 |
-| S6 | VIP고객형 | 프리미엄 서비스, 신속 처리 |
-| S7 | 반복민원형 | 이전 상담 이력 확인, 확실한 해결책 제시 |
-| S8 | 불만항의형 | 차분하게 경청 후 해결 방안 제시 |
+| 코드 | 유형명 | 분포 | 설명 |
+|------|--------|------|------|
+| N1 | 일반친절형 | 50% | 일반적인 응대, 친절한 안내 선호 |
+| N2 | 조용한내성형 | 20% | 간결한 답변 선호, 불필요한 대화 최소화 |
+| S1 | 급한성격형 | 10% | 빠른 답변 선호, 간결한 핵심 전달 |
+| S2 | 꼼꼼상세형 | 10% | 상세한 설명 필요, 차근차근 안내 |
+| S3 | 감정호소형 | 10% | 경청·공감 후 해결책 제시 |
+
+**type_history 구조** (최근 3건):
+```json
+[
+  {
+    "type_code": "N2",
+    "consultation_id": "CS-EMP038-202601231059",
+    "assigned_at": "2026-01-23"
+  },
+  {
+    "type_code": "N1",
+    "consultation_id": "CS-EMP006-202601231024",
+    "assigned_at": "2026-01-23"
+  }
+]
+```
 
 ---
 
@@ -294,22 +315,30 @@ CALL:ACT는 카드사 콜센터 상담사를 위한 실시간 상담 지원 + �
 | 컬럼 | 타입 | 설명 |
 |------|------|------|
 | id | SERIAL PK | 자동 증가 ID |
-| keyword | VARCHAR(200) | 키워드 |
+| keyword | VARCHAR(100) | 키워드 |
 | category | VARCHAR(100) | 카테고리 |
 | priority | INTEGER | 우선순위 (1-10) |
 | urgency | VARCHAR(20) | 긴급도 (low, medium, high) |
 | context_hints | TEXT[] | 문맥 힌트 배열 |
-| weight | FLOAT | 가중치 (기본 1.0, 카드상품명 1.5) |
-| synonyms | TEXT[] | 동의어 배열 |
-| variations | TEXT[] | 변형어 배열 |
-| compound_patterns | JSONB | 복합어 패턴 |
-| ambiguity_rules | JSONB | 모호성 규칙 |
+| weight | DECIMAL(3,2) | 가중치 (기본 1.0, 카드상품명 1.5) |
+| synonyms | TEXT[] | 동의어 배열 (56개 키워드에 수동 정의) |
+| variations | TEXT[] | 변형어 배열 (56개 키워드에 수동 정의) |
+| usage_count | INTEGER | 사용 빈도 (RAG 검색 시 증가) |
 | created_at | TIMESTAMP | 생성일 |
 | updated_at | TIMESTAMP | 수정일 |
 
 - **데이터 건수**: 2,881건 (키워드 사전 2,483건 + 카드상품명 398건)
 - **유니크 제약**: (keyword, category) 조합
 - **비고**: 카드 상품명은 weight=1.5로 높은 가중치 부여.
+
+**synonyms/variations 예시** (56개 핵심 키워드):
+
+| 키워드 | synonyms | variations |
+|--------|----------|------------|
+| 결제 | 지불, 납부, 페이먼트, 페이 | 결제하다, 결제금, 결제액, 결제일 |
+| 분실 | 잃어버림, 유실, 도난 | 분실하다, 분실신고, 분실접수 |
+| 한도 | 이용한도, 사용한도, 리밋 | 한도조회, 한도상향, 한도증액 |
+| 포인트 | 적립금, 리워드, 마일리지 | 포인트적립, 포인트사용, 포인트조회 |
 
 #### keyword_synonyms (키워드 동의어)
 
@@ -374,10 +403,20 @@ CALL:ACT는 카드사 콜센터 상담사를 위한 실시간 상담 지원 + �
 | call_duration | INTEGER | 통화 시간 (초) |
 | call_started_at | TIMESTAMP | 시작 시간 |
 | call_ended_at | TIMESTAMP | 종료 시간 |
+| similarity_score | INTEGER | 유사도 점수 (0-100) |
+| keyword_match_score | INTEGER | 키워드 매칭 점수 (0-100) |
+| document_match_score | INTEGER | 문서 매칭 점수 (0-100) |
+| sequence_match_score | INTEGER | 시퀀스 정확도 점수 (0-100) |
+| time_comparison | JSONB | 시간 비교 정보 |
+| ai_customer_reactions | JSONB | AI 고객 반응 배열 |
+| recording_file_path | VARCHAR(500) | 녹취 파일 경로 |
+| recording_transcript | JSONB | 녹취 전문 |
 | created_at | TIMESTAMP | 생성일 |
 
 - **데이터 건수**: 148건 (Mock)
 - **인덱스**: employee_id, scenario_id, simulation_type, passed
+- **난이도별 점수**: 초급(70-90), 중급(50-80), 고급(30-70)
+- **확장 필드**: `01b_populate_mock_data.py`로 채움
 
 #### employee_learning_analytics (상담사 학습 분석)
 
@@ -584,12 +623,13 @@ CALL:ACT는 카드사 콜센터 상담사를 위한 실시간 상담 지원 + �
 
 ## 5. 스크립트 구조
 
-### 5.1 오케스트레이터
+### 5.1 오케스트레이터 (2단계 실행)
 
-**파일**: `01_setup_callact_db.py` (144줄)
+**1단계**: `01a_setup_callact_db.py` - 기본 스키마 및 데이터 적재
 
-```
-python 01_setup_callact_db.py [옵션]
+```bash
+cd backend_dev/app/db/scripts
+python 01a_setup_callact_db.py [옵션]
 ```
 
 | 옵션 | 설명 |
@@ -601,20 +641,38 @@ python 01_setup_callact_db.py [옵션]
 | `--skip-teddycard` | 테디카드 데이터 적재 건너뛰기 |
 | `--verify-only` | 검증만 실행 |
 
+**2단계**: `01b_populate_mock_data.py` - Mock 데이터 확장
+
+```bash
+python 01b_populate_mock_data.py
+```
+
+- 멱등성 보장: `RANDOM_SEED=42` 고정
+- 5개 모듈을 순차 실행하여 확장 필드 채움
+
 ### 5.2 모듈 구조
 
 ```
 modules/
-  __init__.py           # 공통 유틸리티, 상수, 카테고리 매핑 (326줄)
-  schema_runner.py      # 스키마 생성 + 카테고리 매핑 적재 (193줄)
-  load_employees.py     # 상담사 데이터 적재 (142줄)
-  load_customers.py     # 고객 데이터 적재 (144줄)
-  load_consultations.py # 상담 데이터 적재 + 배분 + FCR 계산 (가장 큰 모듈)
-  update_stats.py       # 상담사 성과 지표 + 고객 통계 업데이트 (215줄)
-  load_keywords.py      # 키워드 사전 + 동의어 + 카드상품명 적재 (251줄)
-  load_teddycard.py     # 테디카드 3종 데이터 적재 (264줄)
-  generate_mock.py      # 시뮬레이션 + 감사 로그 Mock 데이터 (303줄)
-  verify.py             # 체크리스트 + 검증 (443줄)
+  # === 01a_setup_callact_db.py 실행 모듈 ===
+  __init__.py               # 공통 유틸리티, 상수, 카테고리 매핑
+  schema_runner.py          # 스키마 생성 + 카테고리 매핑 적재
+  load_employees.py         # 상담사 데이터 적재
+  load_customers.py         # 고객 데이터 적재
+  load_consultations.py     # 상담 데이터 적재 + 배분 + FCR 계산
+  update_stats.py           # 상담사 성과 지표 + 고객 통계 업데이트
+  load_keywords.py          # 키워드 사전 + 동의어 + 카드상품명 적재
+  load_teddycard.py         # 테디카드 3종 데이터 적재
+  generate_mock.py          # 시뮬레이션 + 감사 로그 Mock 데이터
+  verify.py                 # 체크리스트 + 검증
+
+  # === 01b_populate_mock_data.py 실행 모듈 ===
+  populate_customers_types.py      # [1/5] 고객 5타입 매핑 + type_history
+  populate_extended_fields.py      # [2/5] 상담 확장 필드 (transcript, ai_summary 등)
+  populate_usage_stats.py          # [3/5] 문서 사용 통계 (usage_count, effectiveness_score)
+  populate_simulation_data.py      # [4/5] 시뮬레이션 점수 + AI 반응 데이터
+  populate_keyword_extensions.py   # [5/5] 키워드 동의어/변형어
+  keyword_synonyms_data.py         # 56개 키워드 동의어/변형어 정의
 ```
 
 ### 5.3 SQL 스키마 파일
@@ -637,7 +695,9 @@ modules/
 - **dev 모드**: `data-preprocessing_dev/` 경로 우선 탐색, `data-preprocessing/` 폴백
 - **prod 모드**: `data-preprocessing/` 경로만 사용
 
-### 5.5 실행 순서 (12단계)
+### 5.5 실행 순서
+
+**1단계: 01a_setup_callact_db.py (12단계)**
 
 ```
 [1/12] 기본 DB 스키마 생성
@@ -659,6 +719,17 @@ modules/
 [9/12] 시뮬레이션 교육 Mock 데이터 (148건)
 [10/12] 감사 로그 Mock 데이터 (150건)
 [12/12] 데이터 적재 검증
+→ 완료 시 "NEXT STEP: 01b_populate_mock_data.py 실행" 안내
+```
+
+**2단계: 01b_populate_mock_data.py (5단계)**
+
+```
+[1/5] Customers 5타입 매핑 (current_type_code, type_history)
+[2/5] Consultations 확장 필드 (transcript, ai_summary, feedback 등)
+[3/5] Usage 통계 데이터 (usage_count, effectiveness_score)
+[4/5] Simulation 데이터 (점수, AI 반응, 녹취)
+[5/5] Keyword 동의어/변형어 (56개 키워드)
 ```
 
 ---
@@ -706,6 +777,19 @@ keyword_synonyms (450)            [독립]
 
 ## 결론
 
-CALL:ACT DB는 16개 테이블, 3개 함수, 4개 뷰로 구성되며, PostgreSQL 17 + pgvector를 기반으로 합니다. 모든 데이터는 `01_setup_callact_db.py` 오케스트레이터를 통해 12단계로 자동 적재되며, `random.seed(42)` + `hashlib.md5()` + 고정 기준일을 사용하여 재현성을 보장합니다.
+CALL:ACT DB는 16개 테이블, 3개 함수, 4개 뷰로 구성되며, PostgreSQL 17 + pgvector를 기반으로 합니다.
+
+**실행 흐름**:
+1. `01a_setup_callact_db.py`: 스키마 생성 + 기본 데이터 적재 (12단계)
+2. `01b_populate_mock_data.py`: 확장 필드 Mock 데이터 생성 (5단계)
+
+**재현성 보장**: `RANDOM_SEED=42` + `hashlib.md5()` + 고정 기준일로 누가 실행해도 동일한 결과
+
+**v2.0 주요 변경사항**:
+- 5타입 페르소나 시스템 (N1, N2, S1, S2, S3)
+- type_history: 최근 3건, consultation_id 연결
+- keyword_dictionary: 56개 키워드에 synonyms/variations 수동 정의
+- Mock 데이터 모듈 분리 (01b_ 스크립트)
 
 실행 방법은 [통합 DB 설정 가이드 v3.0](./통합_DB_설정_가이드_v3.0.md)을 참조하세요.
+Mock 데이터 상세 내용은 [DB Mock 데이터 가이드](./DB_Mock_Data_Guide.md)를 참조하세요.
