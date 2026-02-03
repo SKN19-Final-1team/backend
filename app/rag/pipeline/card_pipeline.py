@@ -295,20 +295,8 @@ async def build_card_response(
     t_post = time.perf_counter()
 
     if LOG_TIMING:
-        total = t_post - t_start
-        cache_label = f" cache={cache_status}" if cache_status != "off" else ""
-        retrieve_label = (
-            f" retrieve_cache={retrieve_cache_status}" if retrieve_cache_status != "off" else ""
-        )
-        print(
-            "[rag] "
-            f"route={format_ms(t_route - t_start)} "
-            f"retrieve={format_ms(t_retrieve - t_route)} "
-            f"cards={format_ms(t_cards - t_retrieve)} "
-            f"post={format_ms(t_post - t_cards)} "
-            f"total={format_ms(total)} "
-            f"docs={len(docs)} route={routing.get('route')}{cache_label}{retrieve_label}"
-        )
+        # RAG timing log disabled
+        pass
 
     return {
         "currentSituation": current_cards,

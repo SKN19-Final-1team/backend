@@ -54,7 +54,6 @@ def _should_use_openai(model: str) -> bool:
 def _get_openai_client() -> OpenAI | None:
     global _openai_client
     if not OPENAI_API_KEY:
-        print("[guide_client] OPENAI_API_KEY missing")
         return None
     if _openai_client is None:
         _openai_client = OpenAI(api_key=OPENAI_API_KEY.strip())
@@ -87,12 +86,10 @@ def generate_guide_text(
             )
             return (resp.choices[0].message.content or "").strip()
         except Exception as exc:
-            print(f"[guide_client] openai error: {exc}")
             return ""
 
     api_url = _resolve_api_url()
     if not api_url:
-        print("[guide_client] guide api url missing")
         return ""
 
     payload = {
@@ -111,11 +108,9 @@ def generate_guide_text(
     try:
         response = _session.post(api_url, json=payload, headers=headers, timeout=timeout_sec)
         if response.status_code != 200:
-            print(f"[guide_client] non-200 {response.status_code}: {response.text[:500]}")
             return ""
         result = response.json()
         output = result["choices"][0]["message"]["content"].strip()
         return output
     except (requests.RequestException, KeyError, IndexError, ValueError) as exc:
-        print(f"[guide_client] request error: {exc}")
         return ""
