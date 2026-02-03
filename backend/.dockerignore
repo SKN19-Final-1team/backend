@@ -1,0 +1,77 @@
+# ==================================================
+# .dockerignore - Docker 빌드 시 제외할 파일/폴더
+# ==================================================
+
+# 환경 변수 파일 (보안)
+.env
+.env.*
+!.env.example
+
+# Python 캐시
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# 가상환경
+venv/
+env/
+ENV/
+.venv
+
+# IDE 설정
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# 테스트 및 커버리지
+.pytest_cache/
+.coverage
+htmlcov/
+*.cover
+
+# 문서
+docs/
+*.md
+!README.md
+
+# Docker 관련
+docker/
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# 로그 파일
+*.log
+
+# 임시 파일
+tmp/
+temp/
+*.tmp
+
+# 데이터베이스 파일
+*.db
+*.sqlite
+*.sqlite3
+
+# 모델 캐시 (로컬에만 있는 큰 파일들)
+model_cache/*
+
+# Jupyter notebooks
+*.ipynb
+.ipynb_checkpoints/
+
+# OS 관련
+Thumbs.db
