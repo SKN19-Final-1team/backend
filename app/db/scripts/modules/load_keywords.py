@@ -82,9 +82,9 @@ def load_keyword_dictionary(conn: psycopg2_connection):
         keyword_dict_insert = """
             INSERT INTO keyword_dictionary (
                 keyword, category, priority, urgency, context_hints,
-                weight, synonyms, variations, compound_patterns, ambiguity_rules
+                weight, synonyms, variations
             ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                %s, %s, %s, %s, %s, %s, %s, %s
             )
             ON CONFLICT (keyword, category)
             DO UPDATE SET
@@ -94,8 +94,6 @@ def load_keyword_dictionary(conn: psycopg2_connection):
                 weight = EXCLUDED.weight,
                 synonyms = EXCLUDED.synonyms,
                 variations = EXCLUDED.variations,
-                compound_patterns = EXCLUDED.compound_patterns,
-                ambiguity_rules = EXCLUDED.ambiguity_rules,
                 updated_at = NOW()
         """
 
@@ -115,14 +113,10 @@ def load_keyword_dictionary(conn: psycopg2_connection):
                     weight = float(cat_info.get("weight", 1.0))
                     synonyms = data.get("synonyms", [])
                     variations = data.get("variations", [])
-                    compound_patterns = cat_info.get("compound_patterns")
-                    ambiguity_rules = cat_info.get("ambiguity_rules")
 
                     keyword_batch.append((
                         canonical, category, priority, urgency, context_hints,
-                        weight, synonyms, variations,
-                        PsycopgJson(compound_patterns) if compound_patterns else None,
-                        PsycopgJson(ambiguity_rules) if ambiguity_rules else None
+                        weight, synonyms, variations
                     ))
         else:
             # 리스트 형식 처리
@@ -135,14 +129,10 @@ def load_keyword_dictionary(conn: psycopg2_connection):
                 weight = float(keyword_entry.get('weight', 1.0))
                 synonyms = keyword_entry.get('synonyms', [])
                 variations = keyword_entry.get('variations', [])
-                compound_patterns = keyword_entry.get('compound_patterns')
-                ambiguity_rules = keyword_entry.get('ambiguity_rules')
 
                 keyword_batch.append((
                     keyword, category, priority, urgency, context_hints,
-                    weight, synonyms, variations,
-                    PsycopgJson(compound_patterns) if compound_patterns else None,
-                    PsycopgJson(ambiguity_rules) if ambiguity_rules else None
+                    weight, synonyms, variations
                 ))
 
         # 키워드 적재
@@ -227,8 +217,6 @@ def load_keyword_dictionary(conn: psycopg2_connection):
                     1.5,  # weight (약간 높은 가중치)
                     [],  # synonyms
                     [],  # variations
-                    None,  # compound_patterns
-                    None,  # ambiguity_rules
                 ))
 
             if card_keyword_batch:

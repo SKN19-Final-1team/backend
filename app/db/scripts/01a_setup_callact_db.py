@@ -129,6 +129,18 @@ def main():
         print("  - v_customer_guidance_info: 상담 가이던스용 고객 정보")
         print("  - v_suspicious_downloads: 이상 다운로드 감지")
         print("=" * 60)
+        print()
+        print("[NEXT STEP] 확장 필드에 Mock 데이터를 채우려면 다음 명령어를 실행하세요:")
+        print()
+        print("    python 01b_populate_mock_data.py")
+        print()
+        print("  이 스크립트는 다음 데이터를 생성합니다:")
+        print("  - customers: current_type_code, type_history (5타입 매핑)")
+        print("  - consultations: transcript, ai_summary, feedback 등 확장 필드")
+        print("  - consultation_documents: usage_count, effectiveness_score")
+        print("  - simulation_results: 점수, 녹취, AI 반응 데이터")
+        print("  - keyword_dictionary: synonyms, variations (동의어/변형어)")
+        print("=" * 60)
 
     except Exception as e:
         print(f"\n[ERROR] 작업 중 오류 발생: {e}")
