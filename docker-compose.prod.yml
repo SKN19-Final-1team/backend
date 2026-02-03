@@ -1,0 +1,185 @@
+
+# 사용법:
+#   로컬 테스트: docker-compose -f docker-compose.prod.yml up -d
+#   운영 배포: EC2에서 동일 명령어 실행
+#
+# 주의사항:
+#   - .env.prod 파일이 반드시 필요합니다
+#   - 운영에서는 DB를 RDS로 사용하므로 postgres 서비스는 주석 처리됨
+#   - Redis는 초기에는 여기서 실행, 나중에 ElastiCache로 전환
+
+version: '3.8'
+
+services:
+  # ======================
+  # FastAPI 애플리케이션
+  # ======================
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: callact_app
+    restart: unless-stopped
+
+    # 환경 변수 파일 로드
+    env_file:
+      - .env.prod
+
+    # 환경 변수 추가 설정 (override 가능)
+    environment:
+      - ENVIRONMENT=production
+      - DEBUG=false
+      - MODEL_CACHE_DIR=/app/model_cache
+
+    # 포트 노출 (nginx를 통해서만 접근하므로 외부 노출 불필요)
+    expose:
+      - "8000"
+
+    # 볼륨 마운트
+    volumes:
+      # 모델 캐시 영구 저장
+      - model_cache:/app/model_cache
+      # 로그 저장 (선택사항)
+      - ./logs:/app/logs
+
+    # 의존성
+    depends_on:
+      redis:
+        condition: service_healthy
+
+    # 헬스체크
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+    # 네트워크
+    networks:
+      - callact_network
+
+  # ======================
+  # Nginx (Reverse Proxy)
+  # ======================
+  nginx:
+    image: nginx:alpine
+    container_name: callact_nginx
+    restart: unless-stopped
+
+    # 포트 매핑 (외부 노출)
+    ports:
+      - "80:80"
+      - "443:443"  # HTTPS용 (certbot 설정 후 사용)
+
+    # Nginx 설정 파일 마운트
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      # SSL 인증서 (certbot 사용 시)
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      # Nginx 로그
+      - ./logs/nginx:/var/log/nginx
+
+    # 의존성
+    depends_on:
+      app:
+        condition: service_healthy
+
+    # 헬스체크
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/nginx-health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+    # 네트워크
+    networks:
+      - callact_network
+
+  # ======================
+  # Redis (캐시)
+  # ======================
+  redis:
+    image: redis:7-alpine
+    container_name: callact_redis
+    restart: unless-stopped
+
+    # Redis 포트 (내부 네트워크에서만 접근)
+    expose:
+      - "6379"
+
+    # Redis 설정
+    command: >
+      redis-server
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --save 60 1000
+      --appendonly yes
+
+    # 볼륨 (데이터 영구 저장)
+    volumes:
+      - redis_data:/data
+
+    # 헬스체크
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+    # 네트워크
+    networks:
+      - callact_network
+
+  # ======================
+  # PostgreSQL (로컬 테스트용 - 운영에서는 RDS 사용)
+  # ======================
+  # 주석 처리: 운영에서는 RDS 사용
+  # 로컬 테스트 시에만 주석 해제
+  # postgres:
+  #   build:
+  #     context: .
+  #     dockerfile: docker/Dockerfile
+  #   container_name: callact_db_container
+  #   restart: unless-stopped
+  #   environment:
+  #     POSTGRES_USER: callact_admin
+  #     POSTGRES_PASSWORD: callact_pwd1
+  #     POSTGRES_DB: callact_db
+  #   expose:
+  #     - "5432"
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U callact_admin -d callact_db"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #   networks:
+  #     - callact_network
+
+# ======================
+# 볼륨 정의
+# ======================
+volumes:
+  # 모델 캐시 (큰 AI 모델 파일들)
+  model_cache:
+    driver: local
+
+  # Redis 데이터
+  redis_data:
+    driver: local
+
+  # PostgreSQL 데이터 (로컬 테스트용)
+  # postgres_data:
+  #   driver: local
+
+# ======================
+# 네트워크 정의
+# ======================
+networks:
+  callact_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.25.0.0/16
