@@ -124,6 +124,20 @@ def setup_consultation_relevance(conn: psycopg2_connection):
         print(f"[WARNING] {sql_file} 파일이 없습니다. 건너뜁니다.")
 
 
+def setup_frontend_integration(conn: psycopg2_connection):
+    """Frontend 통합 스키마 v4.0 적용 (페르소나 6타입, consultations 확장)"""
+    print("\n" + "=" * 60)
+    print("[3-6/12] Frontend 통합 스키마 v4.0 적용")
+    print("=" * 60)
+
+    sql_file = SCRIPTS_DIR / "14_schema_v4_frontend_integration.sql"
+    if sql_file.exists():
+        sql_script = load_sql_file(sql_file)
+        execute_sql_script(conn, sql_script, "Frontend 통합 스키마 v4.0")
+    else:
+        print(f"[WARNING] {sql_file} 파일이 없습니다. 건너뜁니다.")
+
+
 def load_category_mappings(conn: psycopg2_connection):
     """카테고리 매핑 테이블 데이터 적재 (57개 원본 → 8개 대분류 + 15개 중분류)"""
     print("\n" + "=" * 60)
@@ -180,7 +194,7 @@ def load_category_mappings(conn: psycopg2_connection):
 
 
 def run_all_schemas(conn: psycopg2_connection):
-    """모든 스키마 생성 + 카테고리 매핑 적재"""
+    """모든 스키마 생성 + 카테고리 매핑 적재 + Frontend 통합"""
     setup_basic_schema(conn)
     setup_teddycard_tables(conn)
     setup_keyword_dictionary_tables(conn)
@@ -190,3 +204,4 @@ def run_all_schemas(conn: psycopg2_connection):
     setup_audit_tables(conn)
     setup_consultation_relevance(conn)
     load_category_mappings(conn)
+    setup_frontend_integration(conn)  # v4.0: 페르소나 6타입 + consultations 확장
