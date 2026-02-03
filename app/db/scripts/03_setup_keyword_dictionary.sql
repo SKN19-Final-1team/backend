@@ -23,8 +23,6 @@ CREATE TABLE IF NOT EXISTS keyword_dictionary (
     weight DECIMAL(3,2) DEFAULT 1.0,  -- 카테고리 내 가중치
     synonyms TEXT[],  -- 동의어 배열
     variations TEXT[],  -- 변형 표현 배열
-    compound_patterns JSONB,  -- 복합 키워드 패턴
-    ambiguity_rules JSONB,  -- 중의성 해소 규칙
     usage_count INTEGER DEFAULT 0,  -- 사용 빈도
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW(),
@@ -40,8 +38,6 @@ COMMENT ON COLUMN keyword_dictionary.context_hints IS '맥락 힌트 배열 (컨
 COMMENT ON COLUMN keyword_dictionary.weight IS '카테고리 내 가중치 (0.0-1.0)';
 COMMENT ON COLUMN keyword_dictionary.synonyms IS '동의어 배열';
 COMMENT ON COLUMN keyword_dictionary.variations IS '변형 표현 배열';
-COMMENT ON COLUMN keyword_dictionary.compound_patterns IS '복합 키워드 패턴 (JSONB)';
-COMMENT ON COLUMN keyword_dictionary.ambiguity_rules IS '중의성 해소 규칙 (JSONB)';
 COMMENT ON COLUMN keyword_dictionary.usage_count IS '사용 빈도 (RAG 검색 시 증가)';
 
 -- 인덱스 생성
