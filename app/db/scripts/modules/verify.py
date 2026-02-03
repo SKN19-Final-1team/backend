@@ -232,7 +232,7 @@ def verify_load(conn: psycopg2_connection):
         'notices': 1,
         'keyword_dictionary': 1,
         'keyword_synonyms': 1,
-        'persona_types': 12,  # 12개 유형 (N1-N4, S1-S8)
+        'persona_types': 5,  # v4.0: 5개 유형 (N1, N2, S1, S2, S3)
         'customers': 0,
         'simulation_scenarios': 5,
         'simulation_results': 0,

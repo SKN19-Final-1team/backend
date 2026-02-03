@@ -39,17 +39,17 @@ def load_customers_data(conn: psycopg2_connection):
     cursor = conn.cursor()
 
     try:
+        # v4.0: personality_tags, communication_style, customer_type_codes, llm_guidance 삭제됨
+        # 이 필드들은 persona_types 테이블에서 JOIN으로 조회
         insert_customer = """
             INSERT INTO customers (
                 id, name, phone, gender, age_group, birth_date, address, grade,
                 card_type, card_number_last4, card_brand, card_issue_date, card_expiry_date,
-                current_type_code, type_history, personality_tags, communication_style,
-                customer_type_codes, llm_guidance, total_consultations, resolved_first_call,
+                current_type_code, type_history, total_consultations, resolved_first_call,
                 last_consultation_date, created_at
             ) VALUES (
                 %s, %s, %s, %s, %s, %s, %s, %s,
                 %s, %s, %s, %s, %s,
-                %s, %s, %s, %s,
                 %s, %s, %s, %s,
                 %s, NOW()
             )
@@ -61,10 +61,7 @@ def load_customers_data(conn: psycopg2_connection):
                 grade = EXCLUDED.grade,
                 card_type = EXCLUDED.card_type,
                 current_type_code = EXCLUDED.current_type_code,
-                personality_tags = EXCLUDED.personality_tags,
-                communication_style = EXCLUDED.communication_style,
-                customer_type_codes = EXCLUDED.customer_type_codes,
-                llm_guidance = EXCLUDED.llm_guidance,
+                type_history = EXCLUDED.type_history,
                 updated_at = NOW()
         """
 
@@ -99,6 +96,14 @@ def load_customers_data(conn: psycopg2_connection):
                 except:
                     last_consultation_date = None
 
+            # v4.0: 5타입 시스템 (N1, N2, S1, S2, S3)만 유효
+            # 12타입 코드(N3, N4, S4-S8 등)는 NULL로 처리
+            VALID_TYPE_CODES = {'N1', 'N2', 'S1', 'S2', 'S3'}
+            current_type = cust.get('current_type_code')
+            if current_type and current_type not in VALID_TYPE_CODES:
+                current_type = None  # FK 제약조건 위반 방지
+
+            # v4.0: personality_tags, communication_style, customer_type_codes, llm_guidance 제거됨
             customer_batch.append((
                 cust.get('id', ''),
                 cust.get('name', ''),
@@ -113,12 +118,8 @@ def load_customers_data(conn: psycopg2_connection):
                 cust.get('card_brand'),
                 card_issue_date,
                 card_expiry_date,
-                cust.get('current_type_code'),
+                current_type,  # 검증된 타입 코드
                 PsycopgJson(cust.get('type_history', [])),
-                cust.get('personality_tags', []),
-                PsycopgJson(cust.get('communication_style', {})),
-                cust.get('customer_type_codes', []),
-                cust.get('llm_guidance'),
                 cust.get('total_consultations', 0),
                 cust.get('resolved_first_call', 0),
                 last_consultation_date
