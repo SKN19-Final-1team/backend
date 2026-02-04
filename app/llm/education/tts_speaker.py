@@ -1,11 +1,3 @@
-"""
-교육 시뮬레이션 대화 관리 모듈
-
-가상 고객 페르소나와의 실시간 대화를 관리합니다.
-- 대화 세션 초기화 및 상태 관리
-- 상담원 입력 처리 및 AI 고객 응답 생성
-- 대화 히스토리 추적
-"""
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 import uuid
