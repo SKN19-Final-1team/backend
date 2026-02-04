@@ -14,10 +14,10 @@ router = APIRouter()
 client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 @router.websocket("/ws/call")
-async def call_websocket_endpoint(websocket: WebSocket):
+async def call_websocket_endpoint(websocket: WebSocket, consultation_id: str = None):
     os.environ.setdefault("RAG_LOG_TIMING", "1")
     await websocket.accept()
-    session_id = str(uuid.uuid4())[:8]
+    session_id = consultation_id if consultation_id else str(uuid.uuid4())[:8]
     
     print(f"[{session_id}] 웹소켓 연결 완료")
     await websocket.send_json(session_id)

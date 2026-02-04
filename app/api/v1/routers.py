@@ -1,10 +1,7 @@
 from fastapi import APIRouter
-from app.api.v1.endpoints import call_websocket, followup, education, edu_websocket, rag_frontend, health
+from app.api.v1.endpoints import call_websocket, followup, education, edu_websocket, rag_frontend
 
 api_router = APIRouter()
-
-# 헬스체크 라우터 (prefix 없이 루트에 마운트)
-api_router.include_router(health.router, tags=["health"])
 
 # 웹소켓 라우터
 api_router.include_router(call_websocket.router, tags=["websocket"])

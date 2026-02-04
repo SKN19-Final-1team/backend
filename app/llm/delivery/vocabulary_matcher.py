@@ -17,7 +17,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
 from app.db.scripts.modules.connect_db import connect_db
 
-# 형태소 분석기 (선택적)
+# 형태소 분석기
 try:
     from app.llm.delivery.morphology_analyzer import (
         extract_card_product_candidates,
@@ -26,7 +26,6 @@ try:
     MORPHOLOGY_AVAILABLE = True
 except ImportError:
     MORPHOLOGY_AVAILABLE = False
-    print("[VocabularyMatcher] 형태소 분석기 없음 (선택사항)")
 
 
 # 전역 캐시
@@ -96,12 +95,13 @@ def normalize_card_name(full_name: str) -> str:
     return normalize_text(full_name)
 
 
-def load_card_products(force_reload: bool = False) -> List[Dict]:
+def load_card_products(force_reload: bool = False, silent: bool = False) -> List[Dict]:
     """
     DB에서 카드상품명 로드 및 캐싱 (card_products 테이블 기반)
 
     Args:
         force_reload: 캐시 무시하고 재로드
+        silent: True면 로그 출력 안함
 
     Returns:
         카드상품명 리스트 [{"id": str, "name": str, "normalized_name": str}, ...]
@@ -111,7 +111,7 @@ def load_card_products(force_reload: bool = False) -> List[Dict]:
     if _CARD_PRODUCTS_CACHE is not None and not force_reload:
         return _CARD_PRODUCTS_CACHE
 
-    conn = connect_db()
+    conn = connect_db(silent=silent)
     cursor = conn.cursor()
 
     try:
@@ -148,12 +148,14 @@ def load_card_products(force_reload: bool = False) -> List[Dict]:
                 seen_normalized.add(normalized_name)
 
         _CARD_PRODUCTS_CACHE = products
-        print(f"[VocabularyMatcher] 카드상품명 {len(products)}개 로드 완료 (정규화: {len(seen_normalized)}개)")
+        if not silent:
+            print(f"[VocabularyMatcher] 카드상품명 {len(products)}개 로드 완료 (정규화: {len(seen_normalized)}개)")
 
         return products
 
     except Exception as e:
-        print(f"[VocabularyMatcher] DB 로드 실패: {e}")
+        if not silent:
+            print(f"[VocabularyMatcher] DB 로드 실패: {e}")
         return []
     finally:
         cursor.close()

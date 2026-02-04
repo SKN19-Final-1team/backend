@@ -23,11 +23,12 @@ try:
         analyze_morphemes,
         extract_nouns,
         extract_card_product_candidates,
+        set_silent_mode,
     )
     MORPHOLOGY_AVAILABLE = True
 except ImportError:
     MORPHOLOGY_AVAILABLE = False
-    print("[KeywordExtractor] 형태소 분석기 없음")
+    set_silent_mode = None
 
 # 어휘 매칭기
 try:
@@ -197,7 +198,7 @@ class KeywordExtractor:
         self._intent_keywords: Dict[str, str] = {}   # 변형 -> 정규형
         self._initialized = False
 
-    def _ensure_initialized(self):
+    def _ensure_initialized(self, silent: bool = False):
         """지연 초기화"""
         if self._initialized:
             return
@@ -215,9 +216,10 @@ class KeywordExtractor:
         self._build_intent_keywords()
 
         self._initialized = True
-        print(f"[KeywordExtractor] 초기화 완료: 교정맵={len(self._correction_map)}, "
-              f"액션={len(self._action_keywords)}, 결제수단={len(self._payment_keywords)}, "
-              f"의도={len(self._intent_keywords)}")
+        if not silent:
+            print(f"[KeywordExtractor] 초기화 완료: 교정맵={len(self._correction_map)}, "
+                  f"액션={len(self._action_keywords)}, 결제수단={len(self._payment_keywords)}, "
+                  f"의도={len(self._intent_keywords)}")
 
     def _load_correction_map(self):
         """STT 오류 교정 사전 로드"""
@@ -544,23 +546,46 @@ class KeywordExtractor:
             
         return False
 
-    def warmup(self):
+    def warmup(self, silent: bool = False):
         """
         초기화 및 형태소 분석기 사전 로드 (Warm-up)
         애플리케이션 시작 시점에 호출하여 첫 요청 지연을 방지합니다.
+
+        Args:
+            silent: True면 상세 로그 출력 없이 간소화된 로그만 출력
         """
-        print("[KeywordExtractor] Warmup 시작...")
-        self._ensure_initialized()
-        
+        if silent:
+            print(">>> Warmup 시작...")
+        else:
+            print("[KeywordExtractor] Warmup 시작...")
+
+        self._ensure_initialized(silent=silent)
+
         if MORPHOLOGY_AVAILABLE:
             try:
+                # silent 모드 설정
+                if set_silent_mode:
+                    set_silent_mode(silent)
                 # 더미 텍스트로 형태소 분석기 로드 트리거
                 analyze_morphemes("초기화")
-                print("[KeywordExtractor] 형태소 분석기 로드 완료")
+                if silent:
+                    print("✅ [키워드 추출기] 로드 완료")
+                else:
+                    print("[KeywordExtractor] 형태소 분석기 로드 완료")
             except Exception as e:
-                print(f"[KeywordExtractor] 형태소 분석기 워밍업 실패: {e}")
-        
-        print("[KeywordExtractor] Warmup 완료")
+                if silent:
+                    print(f"❌ [키워드 추출기] 로드 실패: {e}")
+                else:
+                    print(f"[KeywordExtractor] 형태소 분석기 워밍업 실패: {e}")
+            finally:
+                # silent 모드 해제
+                if set_silent_mode:
+                    set_silent_mode(False)
+
+        if silent:
+            print(">>> Warmup 완료")
+        else:
+            print("[KeywordExtractor] Warmup 완료")
 
 
 # 싱글톤 인스턴스
@@ -593,9 +618,13 @@ def extract_keywords(text: str) -> ExtractedKeywords:
     return get_extractor().extract(text)
 
 
-def warmup():
-    """모듈 웜업 (애플리케이션 시작 시 호출)"""
-    get_extractor().warmup()
+def warmup(silent: bool = False):
+    """모듈 웜업 (애플리케이션 시작 시 호출)
+
+    Args:
+        silent: True면 간소화된 로그만 출력
+    """
+    get_extractor().warmup(silent=silent)
 
 
 @lru_cache(maxsize=256)

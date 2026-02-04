@@ -9,6 +9,7 @@
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 import uuid
+import json
 
 from app.llm.education.client import generate_text
 
@@ -109,9 +110,19 @@ def process_agent_input(
         temperature=0.3,  # 페르소나 일관성을 위해 낮은 temperature
         max_tokens=200
     )
-    
+
     if not customer_response:
         customer_response = "죄송합니다, 잘 이해하지 못했습니다. 다시 말씀해주시겠어요?"
+
+    # sLLM 응답을 터미널에 JSON으로 출력
+    sllm_response_data = {
+        "session_id": session_id,
+        "turn": session.turn_count + 1,
+        "agent_input": agent_message,
+        "customer_response": customer_response
+    }
+    print("\n[Conversation] 🤖 sLLM 응답:")
+    print(json.dumps(sllm_response_data, ensure_ascii=False, indent=2))
     
     # 대화 히스토리에 고객 응답 추가
     session.conversation_history.append({
