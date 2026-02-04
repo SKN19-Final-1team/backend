@@ -8,8 +8,8 @@ from app.core.prompt import PERSONALITY_SYSTEM_PROMPT
 load_dotenv()
 
 client = AsyncOpenAI(
-    base_url=os.getenv("RUNPOD_URL"),
-    api_key=os.getenv("API_KEY")
+    base_url=os.getenv("ACW_TYPE_RUNPOD_URL"),
+    api_key=os.getenv("RUNPOD_API_KEY")
 )
 
 async def get_personality(script):
