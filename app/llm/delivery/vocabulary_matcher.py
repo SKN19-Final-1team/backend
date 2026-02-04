@@ -111,7 +111,7 @@ def load_card_products(force_reload: bool = False, silent: bool = False) -> List
     if _CARD_PRODUCTS_CACHE is not None and not force_reload:
         return _CARD_PRODUCTS_CACHE
 
-    conn = connect_db(silent=silent)
+    conn = connect_db()
     cursor = conn.cursor()
 
     try:
