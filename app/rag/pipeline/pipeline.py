@@ -1,10 +1,13 @@
 from typing import Any, Dict, Optional
 import asyncio
+import os
 
 from app.guide.guide_pipeline import build_guide_response
 from app.rag.pipeline.config import RAGConfig
 from app.rag.pipeline.card_pipeline import build_card_response
 from app.rag.pipeline.search import run_search
+from app.rag.cache.doc_title_cache import record_doc_titles
+from app.rag.router.signals import has_vocab_match
 
 # --- sLLM을 사용한 텍스트 교정 및 키워드 추출 ---
 # NOTE: sLLM 적용은 잠시 비활성화(주석 처리) 상태.
@@ -17,6 +20,22 @@ async def run_rag(
     session_state: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     cfg = config or RAGConfig()
+    require_vocab_match = os.getenv("RAG_REQUIRE_VOCAB_MATCH", "1") != "0"
+    if require_vocab_match and not has_vocab_match(query):
+        return {
+            "currentSituation": [],
+            "nextStep": [],
+            "guidanceScript": "",
+            "guide_script": {"message": ""},
+            "routing": {
+                "should_search": False,
+                "should_route": False,
+                "should_trigger": False,
+                "route": None,
+                "ui_route": None,
+            },
+            "meta": {"model": None, "doc_count": 0, "context_chars": 0},
+        }
     search = await run_search(
         query,
         top_k=cfg.top_k,
@@ -32,6 +51,8 @@ async def run_rag(
             "routing": search.routing,
             "meta": {"model": None, "doc_count": 0, "context_chars": 0},
         }
+
+    record_doc_titles(search.docs)
 
     card_routing = dict(search.routing)
     guide_routing = dict(search.routing)

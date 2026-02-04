@@ -249,24 +249,6 @@ async def retrieve_docs_card_info(
     return docs
 
 
-async def retrieve_docs_with_fallback(
-    query: str,
-    routing: Dict[str, Any],
-    top_k: int,
-    max_stages: int = 1,
-    budget_ms: int | None = None,
-    start_ts: float | None = None,
-) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
-    docs = await retrieve_docs(
-        query=query,
-        routing=routing,
-        top_k=top_k,
-        budget_ms=budget_ms,
-        start_ts=start_ts,
-    )
-    return docs, routing
-
-
 async def retrieve_docs(
     query: str,
     routing: Dict[str, Any],

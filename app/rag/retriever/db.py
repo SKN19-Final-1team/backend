@@ -78,7 +78,7 @@ def _is_scope_filter_allowed(scope_filter: Optional[object]) -> bool:
 
 
 def _db_config() -> Dict[str, object]:
-    host = os.getenv("DB_HOST")
+    host = os.getenv("DB_HOST_IP") or os.getenv("DB_HOST")
     cfg = {
         "host": host,
         "dbname": os.getenv("DB_NAME"),

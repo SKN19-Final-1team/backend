@@ -29,15 +29,8 @@ async def build_guide_response(
     guide_end = time.perf_counter()
 
     if LOG_TIMING:
-        total = guide_end - t_start
-        print(
-            "[guide] "
-            f"route={format_ms(t_route - t_start)} "
-            f"retrieve={format_ms(t_retrieve - t_route)} "
-            f"guide={format_ms(guide_end - guide_start)} "
-            f"total={format_ms(total)} "
-            f"docs={len(docs)} route={routing.get('route')}"
-        )
+        # Guide timing log disabled
+        pass
 
     return {
         "guidanceScript": message or "",
