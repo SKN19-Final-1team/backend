@@ -74,11 +74,18 @@ def map_card_product_data(doc: Dict[str, Any]) -> Tuple:
     performance_condition = doc.get("performance_condition", "")
     main_benefits = doc.get("main_benefits", "")
     status = doc.get("status", "active")
+    # keywords 처리
+    keywords = doc.get("keywords", [])
+    if isinstance(keywords, str):
+        keywords = [k.strip() for k in keywords.split(",")]
+    # embedding 처리
+    embedding = doc.get("embedding")
+    embedding_str = "[" + ",".join(map(str, embedding)) + "]" if embedding else None
     metadata = doc.get("metadata", {})
     structured = doc.get("structured")
     return (
         doc_id, name, card_type, brand, annual_fee_domestic, annual_fee_global,
-        performance_condition, main_benefits, status,
+        performance_condition, main_benefits, status, keywords, embedding_str,
         PsycopgJson(metadata) if metadata else None,
         PsycopgJson(structured) if structured else None
     )
@@ -201,9 +208,9 @@ def load_teddycard_data(conn: psycopg2_connection):
     insert_card_product = """
         INSERT INTO card_products (
             id, name, card_type, brand, annual_fee_domestic, annual_fee_global,
-            performance_condition, main_benefits, status, metadata, structured
+            performance_condition, main_benefits, status, keywords, embedding, metadata, structured
         ) VALUES (
-            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
         )
         ON CONFLICT (id) DO UPDATE SET
             name = EXCLUDED.name,
@@ -214,6 +221,8 @@ def load_teddycard_data(conn: psycopg2_connection):
             performance_condition = EXCLUDED.performance_condition,
             main_benefits = EXCLUDED.main_benefits,
             status = EXCLUDED.status,
+            keywords = EXCLUDED.keywords,
+            embedding = EXCLUDED.embedding,
             metadata = EXCLUDED.metadata,
             structured = EXCLUDED.structured,
             updated_at = NOW()

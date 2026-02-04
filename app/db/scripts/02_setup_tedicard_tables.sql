@@ -83,6 +83,8 @@ CREATE TABLE IF NOT EXISTS card_products (
     performance_condition TEXT,
     main_benefits TEXT,
     status status_type DEFAULT 'active',
+    keywords TEXT[],  -- RAG 검색용 키워드 배열
+    embedding vector(1536),  -- pgvector 확장 타입 (RAG 검색용)
     metadata JSONB,  -- 추가 메타데이터
     structured JSONB,  -- RAG 검색용 구조화 데이터
     created_at TIMESTAMP DEFAULT NOW(),
@@ -92,8 +94,9 @@ CREATE TABLE IF NOT EXISTS card_products (
 CREATE INDEX IF NOT EXISTS idx_card_products_card_type ON card_products(card_type);
 CREATE INDEX IF NOT EXISTS idx_card_products_brand ON card_products(brand);
 CREATE INDEX IF NOT EXISTS idx_card_products_status ON card_products(status);
+CREATE INDEX IF NOT EXISTS idx_card_products_embedding_hnsw ON card_products USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64);
 
-COMMENT ON TABLE card_products IS '카드 상품 마스터 테이블';
+COMMENT ON TABLE card_products IS '카드 상품 마스터 테이블 + RAG 검색용 VectorDB 메타데이터';
 
 -- 5. notices 테이블 생성 (RAG 검색을 위해 keywords, embedding 추가)
 CREATE TABLE IF NOT EXISTS notices (
@@ -152,35 +155,80 @@ BEGIN
     END IF;
 END $$;
 
--- 6-3. card_products 테이블에 metadata, structured 컬럼 추가 (이미 있으면 무시)
-DO $$ 
+-- 6-3. card_products 테이블에 metadata, structured, keywords, embedding 컬럼 추가 (이미 있으면 무시)
+DO $$
 BEGIN
     -- metadata 컬럼 추가
     IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_name = 'card_products' 
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'card_products'
         AND column_name = 'metadata'
     ) THEN
-        ALTER TABLE card_products 
+        ALTER TABLE card_products
         ADD COLUMN metadata JSONB;
-        
+
         RAISE NOTICE 'card_products.metadata 컬럼 추가됨';
     ELSE
         RAISE NOTICE 'card_products.metadata 컬럼이 이미 존재합니다.';
     END IF;
-    
+
     -- structured 컬럼 추가
     IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_name = 'card_products' 
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'card_products'
         AND column_name = 'structured'
     ) THEN
-        ALTER TABLE card_products 
+        ALTER TABLE card_products
         ADD COLUMN structured JSONB;
-        
+
         RAISE NOTICE 'card_products.structured 컬럼 추가됨';
     ELSE
         RAISE NOTICE 'card_products.structured 컬럼이 이미 존재합니다.';
+    END IF;
+
+    -- keywords 컬럼 추가 (RAG 검색용)
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'card_products'
+        AND column_name = 'keywords'
+    ) THEN
+        ALTER TABLE card_products
+        ADD COLUMN keywords TEXT[];
+
+        RAISE NOTICE 'card_products.keywords 컬럼 추가됨';
+    ELSE
+        RAISE NOTICE 'card_products.keywords 컬럼이 이미 존재합니다.';
+    END IF;
+
+    -- embedding 컬럼 추가 (RAG 검색용)
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'card_products'
+        AND column_name = 'embedding'
+    ) THEN
+        ALTER TABLE card_products
+        ADD COLUMN embedding vector(1536);
+
+        RAISE NOTICE 'card_products.embedding 컬럼 추가됨';
+    ELSE
+        RAISE NOTICE 'card_products.embedding 컬럼이 이미 존재합니다.';
+    END IF;
+END $$;
+
+-- 6-3-1. card_products 테이블에 embedding 인덱스 추가 (이미 있으면 무시)
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_indexes
+        WHERE indexname = 'idx_card_products_embedding_hnsw'
+    ) THEN
+        CREATE INDEX idx_card_products_embedding_hnsw
+        ON card_products USING hnsw (embedding vector_cosine_ops)
+        WITH (m = 16, ef_construction = 64);
+
+        RAISE NOTICE 'card_products.embedding 인덱스 생성됨';
+    ELSE
+        RAISE NOTICE 'card_products.embedding 인덱스가 이미 존재합니다.';
     END IF;
 END $$;
 
