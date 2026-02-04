@@ -8,7 +8,6 @@ from app.audio.whisper import WhisperService
 from app.rag.pipeline import RAGConfig, run_rag
 from app.audio.diarizer_manager import DiarizationManager
 from app.core.prompt import DIAR_SYSTEM_PROMPT
-import time
 
 router = APIRouter()
 client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))

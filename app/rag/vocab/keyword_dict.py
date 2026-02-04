@@ -199,7 +199,7 @@ def get_card_name_synonyms() -> Dict[str, List[str]]:
     if _CARD_NAME_CACHE is not None:
         return _CARD_NAME_CACHE
     load_dotenv()
-    host = os.getenv("DB_HOST")
+    host = os.getenv("DB_HOST_IP") or os.getenv("DB_HOST")
     cfg = {
         "host": host,
         "dbname": os.getenv("DB_NAME"),
