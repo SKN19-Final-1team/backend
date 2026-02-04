@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 
 def get_personality_history(conn, customer_id: str):
     """
@@ -28,18 +29,6 @@ def get_personality_history(conn, customer_id: str):
 def update_customer(conn, customer_id: str, current_type_code: str, type_history, fcr=None):
     """
     고객의 페르소나(성향) 정보 업데이트
-
-    v4.0 변경사항:
-    - total_consultations, last_consultation_date, resolved_first_call은
-      DB 트리거(trg_consultation_insert_*)가 자동 처리
-    - 이 함수는 페르소나 정보(current_type_code, type_history)만 업데이트
-
-    Args:
-        conn: DB 연결
-        customer_id: 고객 ID
-        current_type_code: LLM 분류 결과 (N1, N2, S1, S2, S3)
-        type_history: 성향 이력 배열 (예: ["N1", "S2", "S2"])
-        fcr: 더 이상 사용하지 않음 (트리거에서 자동 계산)
     """
     # v4.0: 5타입 유효성 검증
     VALID_TYPE_CODES = {'N1', 'N2', 'S1', 'S2', 'S3'}
@@ -71,3 +60,80 @@ def update_customer(conn, customer_id: str, current_type_code: str, type_history
     except Exception as e:
         conn.rollback()
         print(f"[ERROR] Failed to update customer {customer_id}: {e}")
+
+
+
+def save_consultation_to_db(conn, data, script, evaluation):
+    try:
+        with conn.cursor() as cur:
+            # 상태값 Enum 매핑
+            status_mapping = {
+                "진행중": "in_progress",
+                "완료": "completed",
+                "미완료": "incomplete"
+            }
+            db_status = status_mapping.get(data.status, "in_progress")
+
+            # 날짜/시간 처리
+            dt_obj = datetime.strptime(data.datetime, '%Y-%m-%d %H:%M')
+            
+            # 품질 점수 추출
+            mc = evaluation.get('manual_compliance', {})
+            q_score_raw = mc.get('manual_score', 0)
+            quality_score = int(''.join(filter(str.isdigit, str(q_score_raw)))) if any(c.isdigit() for c in str(q_score_raw)) else 0
+
+            # SQL 실행 (category_sub 컬럼 추가)
+            query = """
+                INSERT INTO consultations (
+                    id, customer_id, agent_id, status, 
+                    category_main, category_sub, category_raw, title, 
+                    call_date, call_time, call_duration, acw_duration,
+                    transcript, ai_summary, agent_notes, 
+                    follow_up_schedule, transfer_department, transfer_notes, 
+                    referenced_documents, 
+                    feedback_text, feedback_emotions, emotion_score,
+                    quality_score, updated_at
+                ) VALUES (
+                    %s, %s, %s, %s, 
+                    %s, %s, %s, %s, 
+                    %s, %s, %s, %s,
+                    %s, %s, %s, 
+                    %s, %s, %s, 
+                    %s, 
+                    %s, %s, %s,
+                    %s, NOW()
+                )
+            """
+
+            cur.execute(query, (
+                data.consultationId,
+                data.customerId,
+                data.employeeId,
+                db_status,
+                data.category,     
+                data.subcategory,  
+                data.category,     
+                data.title,
+                dt_obj.date(),
+                dt_obj.time(),
+                data.callTimeSeconds,
+                data.acwTimeSeconds,
+                json.dumps(script, ensure_ascii=False),
+                data.aiSummary,
+                data.memo,
+                data.followUpTasks,
+                data.handoffDepartment,
+                data.handoffNotes,
+                json.dumps(data.referencedDocuments, ensure_ascii=False),
+                evaluation.get('feedback', ''),
+                json.dumps(evaluation.get('emotions', {}), ensure_ascii=False),
+                evaluation.get('emotion_score', 0),
+                quality_score
+            ))
+
+            conn.commit()
+
+    except Exception as e:
+        if conn: conn.rollback()
+        print(f"상담 DB 저장 실패 {e}")
+        return False
