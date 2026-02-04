@@ -9,11 +9,6 @@ from app.rag.pipeline.search import run_search
 from app.rag.cache.doc_title_cache import record_doc_titles
 from app.rag.router.signals import has_vocab_match
 
-# --- sLLM을 사용한 텍스트 교정 및 키워드 추출 ---
-# NOTE: sLLM 적용은 잠시 비활성화(주석 처리) 상태.
-# from app.llm.sllm_refiner import refine_text
-
-
 async def run_rag(
     query: str,
     config: Optional[RAGConfig] = None,
