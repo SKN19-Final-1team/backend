@@ -8,6 +8,7 @@ from app.audio.whisper import WhisperService
 from app.rag.pipeline import RAGConfig, run_rag
 from app.audio.diarizer_manager import DiarizationManager
 from app.core.prompt import DIAR_SYSTEM_PROMPT
+from fastapi.encoders import jsonable_encoder
 
 router = APIRouter()
 client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -44,7 +45,8 @@ async def call_websocket_endpoint(websocket: WebSocket, consultation_id: str = N
             )
                 
             if result and websocket.client_state == WebSocketState.CONNECTED:
-                await websocket.send_json({"type": "rag", "data": result})
+                safe_result = jsonable_encoder(result)
+                await websocket.send_json({"type": "rag", "data": safe_result})
         
         except Exception as e:
             print(f"[{session_id}] 처리 중 에러 : {e}")
