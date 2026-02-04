@@ -468,43 +468,6 @@ def extract_signals(query: str) -> Signals:
     )
 
 
-def has_vocab_match(query: str) -> bool:
-    if not query or not query.strip():
-        return False
-    normalized = _normalize_query(query)
-    if not normalized:
-        return False
-
-    actions = unique_in_order(_ACTION_KP.extract_keywords(normalized))
-    payments = unique_in_order(_PAYMENT_KP.extract_keywords(normalized))
-    weak_intents = unique_in_order(_WEAK_INTENT_KP.extract_keywords(normalized))
-
-    if not actions:
-        actions = unique_in_order(_fallback_contains(ACTION_SYNONYMS, normalized))
-    if not payments:
-        payments = unique_in_order(_fallback_contains(PAYMENT_SYNONYMS, normalized))
-    if not weak_intents:
-        weak_intents = unique_in_order(_fallback_contains(WEAK_INTENT_SYNONYMS, normalized))
-
-    if actions or payments or weak_intents:
-        return True
-
-    if _match_compound_patterns(query):
-        return True
-
-    # 카드명은 keyword_dict 기반이 아니라 DB 동의어를 사용하므로,
-    # 필요 시 환경변수로 활성화합니다.
-    if os.getenv("RAG_MATCH_CARD_NAMES", "0") != "0":
-        card_kp = _ensure_card_kp()
-        card_names = unique_in_order(card_kp.extract_keywords(normalized))
-        if not card_names:
-            card_names = unique_in_order(_fallback_contains(get_card_name_synonyms(), normalized))
-        if card_names:
-            return True
-
-    return False
-
-
 def first(items: List[str]) -> Optional[str]:
     return items[0] if items else None
 

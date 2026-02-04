@@ -40,78 +40,93 @@ from app.llm.delivery.vocabulary_matcher import load_card_products
 _kiwi_instance: Optional[Kiwi] = None
 _spacing_instance: Optional[Spacing] = None
 _user_dict_loaded: bool = False
+_silent_mode: bool = False  # Warmup 시 로그 출력 제어
+
+
+def set_silent_mode(silent: bool):
+    """로그 출력 모드 설정"""
+    global _silent_mode
+    _silent_mode = silent
 
 
 def get_kiwi() -> Optional[Kiwi]:
     """
     Kiwi 인스턴스 반환 (싱글톤)
-    
+
     Returns:
         Kiwi 인스턴스 또는 None
     """
-    global _kiwi_instance, _user_dict_loaded
-    
+    global _kiwi_instance, _user_dict_loaded, _silent_mode
+
     if not KIWI_AVAILABLE:
         return None
-    
+
     if _kiwi_instance is None:
         try:
-            print("[MorphologyAnalyzer] Kiwipiepy 초기화 중...")
-            
+            if not _silent_mode:
+                print("[MorphologyAnalyzer] Kiwipiepy 초기화 중...")
+
             # 오타 교정 활성화 (기본 + 연철 오타)
             _kiwi_instance = Kiwi(
                 typos='basic_with_continual',
                 typo_cost_threshold=2.5
             )
-            
+
             # 사용자 사전 로드
             if not _user_dict_loaded:
                 try:
-                    products = load_card_products()
+                    products = load_card_products(silent=_silent_mode)
                     count = 0
-                    
+
                     for product in products:
-                        keyword = product["keyword"]
-                        _kiwi_instance.add_user_word(keyword, "NNP")
-                        count += 1
-                        
-                        # 동의어도 추가
-                        for syn in product.get("synonyms", []):
-                            if syn and syn.strip():
-                                _kiwi_instance.add_user_word(syn, "NNP")
-                                count += 1
-                    
+                        # normalized_name을 사용자 사전에 추가
+                        card_name = product.get("normalized_name") or product.get("name")
+                        if card_name:
+                            _kiwi_instance.add_user_word(card_name, "NNP")
+                            count += 1
+
                     # 고빈도 STT 오류 패턴 등록
-                    register_common_stt_errors(_kiwi_instance)
-                    
+                    register_common_stt_errors(_kiwi_instance, silent=_silent_mode)
+
                     _user_dict_loaded = True
-                    print(f"[MorphologyAnalyzer] 사용자 사전 {count}개 단어 로드 완료")
-                    print(f"[MorphologyAnalyzer] STT 오류 패턴 등록 완료")
-                    
+                    if _silent_mode:
+                        print("✅ [형태소 분석기] 로드 완료")
+                        print("✅ [사용자 사전] 로드 완료")
+                    else:
+                        print(f"[MorphologyAnalyzer] 사용자 사전 {count}개 단어 로드 완료")
+                        print(f"[MorphologyAnalyzer] STT 오류 패턴 등록 완료")
+
                 except Exception as e:
-                    print(f"[MorphologyAnalyzer] 사용자 사전 로드 실패: {e}")
-            
+                    if _silent_mode:
+                        print(f"❌ [사용자 사전] 로드 실패: {e}")
+                    else:
+                        print(f"[MorphologyAnalyzer] 사용자 사전 로드 실패: {e}")
+
         except Exception as e:
-            print(f"[MorphologyAnalyzer] Kiwipiepy 초기화 실패: {e}")
+            if _silent_mode:
+                print(f"❌ [형태소 분석기] Kiwipiepy 로드 실패: {e}")
+            else:
+                print(f"[MorphologyAnalyzer] Kiwipiepy 초기화 실패: {e}")
             return None
-    
+
     return _kiwi_instance
 
 
-def register_common_stt_errors(kiwi: Kiwi):
+def register_common_stt_errors(kiwi: Kiwi, silent: bool = False):
     """
     고빈도 STT 오류 패턴을 기분석 형태로 등록
-    
+
     keywords_dict_refine.json 파일에서 교정 맵을 로드하여 등록
-    
+
     Args:
         kiwi: Kiwi 인스턴스
+        silent: True면 로그 출력 안함
     """
     import json
     import os
-    
+
     registered_count = 0
-    
+
     try:
         # JSON 파일 경로
         json_path = os.path.join(
@@ -119,14 +134,14 @@ def register_common_stt_errors(kiwi: Kiwi):
             '..', '..', 'rag', 'vocab', 'keywords_dict_refine.json'
         )
         json_path = os.path.normpath(json_path)
-        
+
         # JSON 파일 로드
         if os.path.exists(json_path):
             with open(json_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            
+
             correction_map = data.get("correction_map", {})
-            
+
             # Step 1: 타겟 형태소 먼저 등록 (교정 결과 단어들)
             target_words = set(correction_map.values())
             for word in target_words:
@@ -136,13 +151,13 @@ def register_common_stt_errors(kiwi: Kiwi):
                         kiwi.add_user_word(word, "NNG")
                 except Exception:
                     pass  # 이미 존재하면 무시
-            
+
             # Step 2: 기분석 형태 등록 (오류 → 교정)
             for error_form, correct_form in correction_map.items():
                 # 같은 단어면 스킵
                 if error_form == correct_form:
                     continue
-                
+
                 try:
                     # 기분석 형태 등록
                     result = kiwi.add_pre_analyzed_word(
@@ -154,20 +169,23 @@ def register_common_stt_errors(kiwi: Kiwi):
                         registered_count += 1
                 except Exception:
                     pass  # 등록 실패해도 계속 진행
-            
-            print(f"[MorphologyAnalyzer] keywords_dict_refine.json에서 {registered_count}개 오류 패턴 등록")
+
+            if not silent:
+                print(f"[MorphologyAnalyzer] keywords_dict_refine.json에서 {registered_count}개 오류 패턴 등록")
         else:
-            print(f"[MorphologyAnalyzer] JSON 파일 없음: {json_path}")
+            if not silent:
+                print(f"[MorphologyAnalyzer] JSON 파일 없음: {json_path}")
             # 기본 패턴 등록 (fallback)
-            _register_default_patterns(kiwi)
-            
+            _register_default_patterns(kiwi, silent=silent)
+
     except Exception as e:
-        print(f"[MorphologyAnalyzer] STT 오류 패턴 등록 실패: {e}")
+        if not silent:
+            print(f"[MorphologyAnalyzer] STT 오류 패턴 등록 실패: {e}")
         # 기본 패턴 등록 (fallback)
-        _register_default_patterns(kiwi)
+        _register_default_patterns(kiwi, silent=silent)
 
 
-def _register_default_patterns(kiwi: Kiwi):
+def _register_default_patterns(kiwi: Kiwi, silent: bool = False):
     """기본 STT 오류 패턴 등록 (fallback)"""
     try:
         target_words = [
@@ -176,20 +194,20 @@ def _register_default_patterns(kiwi: Kiwi):
             ("바우처", "NNG"),
             ("익일", "NNG"),
         ]
-        
+
         for word, tag in target_words:
             try:
                 kiwi.add_user_word(word, tag)
             except Exception:
                 pass
-        
+
         patterns = [
             ("하나낸", [("하나은행", "NNP", 0, 3)], -2),
             ("연예비", [("연회비", "NNG", 0, 3)], -2),
             ("바우저", [("바우처", "NNG", 0, 3)], -2),
             ("이길영업일", [("익일", "NNG", 0, 2), ("영업일", "NNG", 2, 3)], -2),
         ]
-        
+
         count = 0
         for form, analyzed, score in patterns:
             try:
@@ -197,11 +215,13 @@ def _register_default_patterns(kiwi: Kiwi):
                     count += 1
             except Exception:
                 pass
-        
-        print(f"[MorphologyAnalyzer] 기본 패턴 {count}개 등록 (fallback)")
-        
+
+        if not silent:
+            print(f"[MorphologyAnalyzer] 기본 패턴 {count}개 등록 (fallback)")
+
     except Exception as e:
-        print(f"[MorphologyAnalyzer] 기본 패턴 등록 실패: {e}")
+        if not silent:
+            print(f"[MorphologyAnalyzer] 기본 패턴 등록 실패: {e}")
 
 
 
@@ -219,10 +239,10 @@ def get_spacing() -> Optional[Spacing]:
     
     if _spacing_instance is None:
         try:
-            print("[MorphologyAnalyzer] PyKoSpacing 초기화 중...")
+            print("✅ [문법 교정기] 로드 완료")
             _spacing_instance = Spacing()
         except Exception as e:
-            print(f"[MorphologyAnalyzer] PyKoSpacing 초기화 실패: {e}")
+            print(f"❌ [문법 교정기] 로드 실패: {e}")
             return None
     
     return _spacing_instance
@@ -340,7 +360,7 @@ def _find_protected_terms(text: str) -> List[Tuple[str, int, int]]:
     products = load_card_products()
 
     # 긴 카드명부터 매칭 (부분 문자열 충돌 방지)
-    card_names = sorted([p["keyword"] for p in products], key=len, reverse=True)
+    card_names = sorted([p.get("normalized_name") or p.get("name", "") for p in products], key=len, reverse=True)
 
     for card_name in card_names:
         # 대소문자 구분 없이 검색

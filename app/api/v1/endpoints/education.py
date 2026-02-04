@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import random
+import json
 
 from app.db.base import get_connection
 import psycopg2.extras
@@ -30,6 +31,29 @@ from app.llm.education.result_manager import (
 _simulation_metadata: Dict[str, Dict[str, Any]] = {}
 
 
+# 카테고리 정규화 매핑 (프론트엔드 → DB category_main)
+CATEGORY_MAPPING = {
+    '카드분실': '분실/도난',
+    '분실/도난': '분실/도난',
+    '해외결제': '결제/승인',
+    '결제/승인': '결제/승인',
+    '수수료문의': '수수료/연체',
+    '수수료/연체': '수수료/연체',
+    '포인트/혜택': '포인트/혜택',
+    '한도증액': '한도',
+    '한도': '한도',
+    '이용내역': '이용내역',
+    '정부지원': '정부지원',
+    '기타': '기타',
+    '기타문의': '기타',
+}
+
+
+def normalize_category(category: str) -> str:
+    """프론트엔드 카테고리를 DB category_main으로 변환"""
+    return CATEGORY_MAPPING.get(category, category)
+
+
 router = APIRouter()
 
 
@@ -40,9 +64,11 @@ class ScenarioListResponse(BaseModel):
 
 class SimulationStartRequest(BaseModel):
     """시뮬레이션 시작 요청"""
-    category: str  # 문의 유형 (예: "도난/분실 신청/해제")
+    category: str  # 문의 유형 (예: "분실/도난")
     difficulty: str  # "beginner" 또는 "advanced"
     employee_id: Optional[str] = None  # 직원 ID (결과 저장용)
+    scenario_id: Optional[str] = None  # 기본 시나리오 ID (초급용)
+    consultation_id: Optional[str] = None  # 우수사례 상담 ID (상급용)
 
 
 class SimulationStartResponse(BaseModel):
@@ -144,23 +170,43 @@ async def start_simulation(request: SimulationStartRequest):
     """
     conn = get_connection()
 
+    # 카테고리 정규화
+    normalized_category = normalize_category(request.category)
+
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            # 1. consultations 테이블에서 category_main으로 상담 건 선택
-            cur.execute("""
-                SELECT c.id, c.customer_id
-                FROM consultations c
-                WHERE c.category_main = %s
-                ORDER BY RANDOM()
-                LIMIT 1
-            """, (request.category,))
+            consultation_row = None
 
-            consultation_row = cur.fetchone()
+            # 난이도별 분기
+            if request.difficulty == "advanced" and request.consultation_id:
+                # 상급 (우수사례): 특정 consultation_id로 조회
+                cur.execute("""
+                    SELECT c.id, c.customer_id
+                    FROM consultations c
+                    WHERE c.id = %s
+                """, (request.consultation_id,))
+                consultation_row = cur.fetchone()
+
+                if not consultation_row:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"상담 ID '{request.consultation_id}'를 찾을 수 없습니다."
+                    )
+            else:
+                # 초급 (기본 시나리오): 카테고리로 랜덤 선택
+                cur.execute("""
+                    SELECT c.id, c.customer_id
+                    FROM consultations c
+                    WHERE c.category_main = %s
+                    ORDER BY RANDOM()
+                    LIMIT 1
+                """, (normalized_category,))
+                consultation_row = cur.fetchone()
 
             if not consultation_row:
                 raise HTTPException(
                     status_code=404,
-                    detail=f"카테고리 '{request.category}'에 해당하는 상담 사례가 없습니다."
+                    detail=f"카테고리 '{normalized_category}'에 해당하는 상담 사례가 없습니다."
                 )
 
             consultation_id = consultation_row["id"]
@@ -187,7 +233,7 @@ async def start_simulation(request: SimulationStartRequest):
             # 3. customers 테이블에서 고객 정보 조회
             cur.execute("""
                 SELECT name, gender, age_group, grade, card_type,
-                       personality_tags, customer_type_codes
+                       current_type_code
                 FROM customers
                 WHERE id = %s
             """, (customer_id,))
@@ -196,11 +242,11 @@ async def start_simulation(request: SimulationStartRequest):
 
             # 4. persona_types 테이블에서 페르소나 정보 조회
             persona_info = None
-            if customer_row and customer_row.get("customer_type_codes"):
-                type_codes = customer_row["customer_type_codes"]
+            if customer_row and customer_row.get("current_type_code"):
+                type_codes = customer_row["current_type_code"]
                 if type_codes and len(type_codes) > 0:
                     cur.execute("""
-                        SELECT name, description, communication_style
+                        SELECT name, description, communication_style, personality_tags
                         FROM persona_types
                         WHERE code = %s
                     """, (type_codes[0],))
@@ -257,6 +303,43 @@ async def start_simulation(request: SimulationStartRequest):
                     consultation_content,
                     difficulty="advanced"
                 )
+                # 우수사례(상급) 시뮬레이션에서만 시나리오 생성 성공 메세지 표시
+                print("\n" + "="*60)
+                print("[Education] ✅ 시나리오 생성 성공 (우수사례 시뮬레이션)")
+                print("="*60)
+
+            # === 터미널에 JSON 출력 ===
+            print("\n" + "="*60)
+            print(f"[Education] 시뮬레이션 시작 - 난이도: {request.difficulty}")
+            print("="*60)
+
+            # 1. DB에서 가져온 데이터 출력
+            db_data = {
+                "consultation": {
+                    "id": consultation_id,
+                    "customer_id": customer_id,
+                    "category": normalized_category
+                },
+                "consultation_document": {
+                    "title": consultation_title,
+                    "keywords": consultation_keywords,
+                    "content_preview": consultation_content[:200] + "..." if consultation_content and len(consultation_content) > 200 else consultation_content
+                } if doc_row else None,
+                "customer": dict(customer_row) if customer_row else None,
+                "persona_type": dict(persona_info) if persona_info else None
+            }
+            print("\n[Education] 📊 DB 데이터:")
+            print(json.dumps(db_data, ensure_ascii=False, indent=2, default=str))
+
+            # 2. 시나리오 출력 (우수사례의 경우만)
+            if request.difficulty == "advanced" and scenario_script:
+                print("\n[Education] 📋 시나리오 (우수사례):")
+                print(json.dumps(scenario_script, ensure_ascii=False, indent=2))
+
+            # 3. 고객 페르소나 출력
+            print("\n[Education] 👤 고객 페르소나:")
+            print(json.dumps(customer_profile, ensure_ascii=False, indent=2, default=str))
+            print("="*60 + "\n")
 
             # 세션 ID 생성
             session_id = f"sim_{consultation_id}_{random.randint(10000, 99999)}"
@@ -267,14 +350,15 @@ async def start_simulation(request: SimulationStartRequest):
             # 시뮬레이션 메타데이터 저장 (종료 시 평가에 사용)
             _simulation_metadata[session_id] = {
                 "employee_id": request.employee_id,
-                "category": request.category,
+                "category": normalized_category,
                 "difficulty": request.difficulty,
                 "consultation_id": consultation_id,
                 "consultation_content": consultation_content,
                 "consultation_title": consultation_title,
                 "consultation_keywords": consultation_keywords,
                 "scenario_script": scenario_script,
-                "simulation_type": "best_practice" if request.difficulty == "advanced" else "scenario"
+                "simulation_type": "best_practice" if request.difficulty == "advanced" else "scenario",
+                "scenario_id": request.scenario_id,
             }
 
             return SimulationStartResponse(

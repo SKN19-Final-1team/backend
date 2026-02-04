@@ -6,11 +6,6 @@ from app.core.prompt import SUMMARIZE_SYSTEM_PROMPT
 
 load_dotenv()
 
-# client = AsyncOpenAI(
-#     base_url=os.getenv("RUNPOD_URL"),
-#     api_key=os.getenv("API_KEY")
-# )
-
 client = AsyncOpenAI(
     api_key=os.getenv("OPENAI_API_KEY")
 )

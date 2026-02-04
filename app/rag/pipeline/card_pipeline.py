@@ -6,7 +6,41 @@ import os
 import re
 import time
 
-## Removed broken import: generate_detail_cards, build_rule_cards (not found in card_generator.py)
+## Simple card generation functions (replacing broken imports)
+def generate_detail_cards(
+    query: str,
+    docs: List[Dict[str, Any]],
+    model: str = "",
+    temperature: float = 0.0,
+    max_llm_cards: int = 4,
+) -> tuple[List[Dict[str, Any]], str]:
+    """문서를 카드 형식으로 변환"""
+    cards = []
+    for doc in docs[:max_llm_cards]:
+        meta = doc.get("metadata") or {}
+        card = {
+            "id": str(doc.get("id") or meta.get("id") or ""),
+            "title": doc.get("title") or meta.get("title") or "",
+            "content": doc.get("content") or "",
+            "keywords": doc.get("keywords") or [],
+            "systemPath": meta.get("systemPath") or meta.get("system_path") or "",
+            "requiredChecks": meta.get("requiredChecks") or [],
+            "exceptions": meta.get("exceptions") or [],
+            "regulation": meta.get("regulation") or "",
+            "fullText": doc.get("content") or "",
+            "time": meta.get("time") or "",
+            "note": meta.get("note") or "",
+            "documentType": meta.get("documentType") or doc.get("table") or "general",
+        }
+        cards.append(card)
+    return cards, ""
+
+
+def build_rule_cards(query: str, docs: List[Dict[str, Any]]) -> tuple[List[Dict[str, Any]], str]:
+    """규칙 기반 카드 생성 (fallback)"""
+    return generate_detail_cards(query, docs, max_llm_cards=4)
+
+
 from app.rag.cache.card_cache import (
     CARD_CACHE_ENABLED,
     build_card_cache_key,
@@ -295,8 +329,20 @@ async def build_card_response(
     t_post = time.perf_counter()
 
     if LOG_TIMING:
-        # RAG timing log disabled
-        pass
+        total = t_post - t_start
+        cache_label = f" cache={cache_status}" if cache_status != "off" else ""
+        retrieve_label = (
+            f" retrieve_cache={retrieve_cache_status}" if retrieve_cache_status != "off" else ""
+        )
+        print(
+            "[rag] "
+            f"route={format_ms(t_route - t_start)} "
+            f"retrieve={format_ms(t_retrieve - t_route)} "
+            f"cards={format_ms(t_cards - t_retrieve)} "
+            f"post={format_ms(t_post - t_cards)} "
+            f"total={format_ms(total)} "
+            f"docs={len(docs)} route={routing.get('route')}{cache_label}{retrieve_label}"
+        )
 
     return {
         "currentSituation": current_cards,
