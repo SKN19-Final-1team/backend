@@ -4,7 +4,10 @@
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
+import json
+import os
+import re
 
 from app.guide.guide_client import generate_guide_text
 from app.guide.text_utils import (
@@ -24,6 +27,214 @@ from app.guide.text_utils import (
     normalize_output,
     question_allowed,
 )
+from app.llm.base import get_openai_client
+
+
+_CARD_FIELDS = (
+    "id",
+    "title",
+    "keywords",
+    "content",
+    "systemPath",
+    "requiredChecks",
+    "exceptions",
+    "regulation",
+    "fullText",
+    "time",
+    "note",
+    "documentType",
+)
+
+
+def _ensure_list(value: Any) -> List[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(v) for v in value if v not in ("", None)]
+    if isinstance(value, str):
+        parts = [p.strip() for p in re.split(r"[\n;]", value) if p.strip()]
+        return parts
+    return [str(value)]
+
+
+def _summarize_text(text: str, limit: int = 180) -> Optional[str]:
+    if not text:
+        return None
+    sents = [s.strip() for s in _SENT_SPLIT.split(text) if s and s.strip()]
+    if not sents:
+        return truncate(text, limit)
+    summary = " ".join(sents[:2]).strip()
+    return truncate(summary, limit) if summary else None
+
+
+def _doc_to_card_base(doc: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not doc:
+        return {k: None for k in _CARD_FIELDS}
+    meta = doc.get("metadata") or {}
+    raw_content = doc.get("detailContent") or meta.get("full_content") or doc.get("content") or ""
+    raw_content = str(raw_content)
+    summary = _summarize_text(raw_content)
+    return {
+        "id": str(doc.get("id") or meta.get("id") or ""),
+        "title": doc.get("title") or meta.get("title") or "",
+        "keywords": _ensure_list(doc.get("keywords") or meta.get("keywords")),
+        "content": summary,
+        "systemPath": meta.get("systemPath") or meta.get("system_path") or "",
+        "requiredChecks": _ensure_list(meta.get("requiredChecks") or meta.get("required_checks")),
+        "exceptions": _ensure_list(meta.get("exceptions")),
+        "regulation": meta.get("regulation") or "",
+        "fullText": raw_content.strip() or None,
+        "time": meta.get("time") or "",
+        "note": meta.get("note") or "",
+        "documentType": meta.get("documentType") or doc.get("table") or "general",
+    }
+
+
+def _merge_card(base: Dict[str, Any], overlay: Dict[str, Any]) -> Dict[str, Any]:
+    merged = dict(base)
+    for key in _CARD_FIELDS:
+        if key not in overlay:
+            continue
+        val = overlay.get(key)
+        if key in ("requiredChecks", "exceptions", "keywords"):
+            lst = _ensure_list(val)
+            if lst:
+                merged[key] = lst
+            continue
+        if val not in ("", None):
+            merged[key] = val
+    # enforce nullable fields for summary/full text
+    for key in ("content", "fullText"):
+        if merged.get(key) in ("", None):
+            merged[key] = None
+    # keep strings for others
+    for key in ("title", "systemPath", "regulation", "time", "note", "documentType", "id"):
+        if merged.get(key) is None:
+            merged[key] = ""
+    return merged
+
+
+def _strip_code_fences(text: str) -> str:
+    if "```" not in text:
+        return text.strip()
+    parts = re.split(r"```(?:json)?", text, flags=re.IGNORECASE)
+    if len(parts) >= 2:
+        rest = parts[1]
+        rest = re.split(r"```", rest)[0]
+        return rest.strip()
+    return text.strip()
+
+
+def _extract_json(text: str) -> Optional[Any]:
+    if not text:
+        return None
+    cleaned = _strip_code_fences(text)
+    try:
+        return json.loads(cleaned)
+    except Exception:
+        pass
+    # try to slice to first JSON token
+    for opener, closer in (("{", "}"), ("[", "]")):
+        start = cleaned.find(opener)
+        end = cleaned.rfind(closer)
+        if start != -1 and end != -1 and end > start:
+            snippet = cleaned[start : end + 1]
+            try:
+                return json.loads(snippet)
+            except Exception:
+                continue
+    return None
+
+
+def _build_card_messages(query: str, docs: List[Dict[str, Any]], max_cards: int) -> List[Dict[str, str]]:
+    doc_block = build_doc_block(query, docs, max_cards)
+    system_prompt = (
+        "당신은 카드사 내부 상담 시나리오 카드를 작성하는 AI입니다.\n"
+        "아래 Documents에 있는 내용만 사용하여 카드 JSON 배열을 생성하세요.\n\n"
+        "[출력 형식]\n"
+        "- 반드시 JSON만 출력하세요. (코드블록/설명 금지)\n"
+        "- 최상위는 배열 또는 {\"cards\": [...]} 둘 중 하나로 출력합니다.\n\n"
+        "[카드 필드]\n"
+        "- id, title, keywords, content, systemPath, requiredChecks, exceptions, regulation, fullText, time, note, documentType\n"
+        "- content: 1~2문장 요약(문서 기반). 없으면 null\n"
+        "- fullText: 문서 내용을 가능한 한 그대로(없으면 null)\n"
+        "- requiredChecks/exceptions/keywords: 배열 (없으면 빈 배열)\n"
+        "- 그 외 문자열 필드는 없으면 빈 문자열\n\n"
+        "[제약]\n"
+        "- 문서에 없는 절차/정책/기간/조건은 절대 만들지 마세요.\n"
+        "- 요약은 문서에서 근거가 보이는 내용만 사용하세요.\n"
+    )
+    user_prompt = (
+        f"User query:\n{query}\n\n"
+        f"Documents:\n{doc_block or 'NONE'}\n\n"
+        f"카드 개수는 최대 {max_cards}개까지만 생성하세요."
+    )
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+
+
+def build_rule_cards(query: str, docs: List[Dict[str, Any]], max_cards: int = 4) -> tuple[List[Dict[str, Any]], str]:
+    cards = []
+    for doc in docs[:max_cards]:
+        base = _doc_to_card_base(doc)
+        # ensure nullable fields are present
+        if base.get("content") is None and base.get("fullText"):
+            base["content"] = _summarize_text(str(base.get("fullText") or ""))
+        cards.append(_merge_card(base, {}))
+    return cards, ""
+
+
+def generate_detail_cards(
+    query: str,
+    docs: List[Dict[str, Any]],
+    model: str = "",
+    temperature: float = 0.0,
+    max_llm_cards: int = 4,
+) -> tuple[List[Dict[str, Any]], str]:
+    if not docs:
+        return [], ""
+
+    model = model or os.getenv("RAG_CARD_MODEL", "gpt-4.1-mini")
+    messages = _build_card_messages(query, docs, max_llm_cards)
+
+    try:
+        client = get_openai_client()
+        resp = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=900,
+            top_p=0.9,
+        )
+        output = (resp.choices[0].message.content or "").strip()
+    except Exception:
+        return build_rule_cards(query, docs, max_cards=max_llm_cards)
+
+    parsed = _extract_json(output)
+    if isinstance(parsed, dict):
+        parsed = parsed.get("cards")
+    if not isinstance(parsed, list):
+        return build_rule_cards(query, docs, max_cards=max_llm_cards)
+
+    docs_by_id = {str(d.get("id") or ""): d for d in docs}
+    unused_docs = [d for d in docs if str(d.get("id") or "") not in docs_by_id or str(d.get("id") or "") == ""]
+    cards: List[Dict[str, Any]] = []
+    for item in parsed[:max_llm_cards]:
+        if not isinstance(item, dict):
+            continue
+        card_id = str(item.get("id") or "")
+        doc = docs_by_id.get(card_id)
+        if doc is None and unused_docs:
+            doc = unused_docs.pop(0)
+        base = _doc_to_card_base(doc)
+        merged = _merge_card(base, item)
+        cards.append(merged)
+
+    if not cards:
+        return build_rule_cards(query, docs, max_cards=max_llm_cards)
+    return cards, output
 
 
 def _apply_question_policy(text: str, query: str) -> str:
@@ -221,4 +432,4 @@ def generate_guide_message(
     return _fallback_message(query)
 
 
-__all__ = ["generate_guide_message"]
+__all__ = ["generate_guide_message", "generate_detail_cards", "build_rule_cards"]

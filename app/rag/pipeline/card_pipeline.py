@@ -6,6 +6,7 @@ import os
 import re
 import time
 
+from app.llm.rag_llm.card_generator import generate_detail_cards, build_rule_cards
 from app.rag.cache.card_cache import (
     CARD_CACHE_ENABLED,
     build_card_cache_key,
@@ -75,6 +76,22 @@ def _strip_noisy_disclaimer_in_cards(cards: List[Dict[str, Any]]) -> List[Dict[s
                 continue
             kept.append(ln)
         updated["content"] = "\n".join(kept).strip()
+        out.append(updated)
+    return out
+
+
+def _ensure_nullable_fields(cards: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    if not cards:
+        return cards
+    out: List[Dict[str, Any]] = []
+    for card in cards:
+        updated = dict(card)
+        content = updated.get("content")
+        full_text = updated.get("fullText")
+        if content in ("", None):
+            updated["content"] = None
+        if full_text in ("", None):
+            updated["fullText"] = None
         out.append(updated)
     return out
 
@@ -284,6 +301,7 @@ async def build_card_response(
     cards = [omit_empty(card) for card in cards]
     cards = _strip_phone_in_cards(cards)
     cards = _strip_noisy_disclaimer_in_cards(cards)
+    cards = _ensure_nullable_fields(cards)
     if route_name == "card_info":
         cards = _inject_missing_terms_in_cards(cards, query)
         cards = _ensure_benefit_phrase(cards, query)

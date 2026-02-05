@@ -1,9 +1,17 @@
 from typing import Any, Dict, List
+import os
 
 import re
 
 from app.rag.common.text_utils import unique_in_order
 from app.rag.vocab.keyword_dict import STOPWORDS
+
+try:
+    from app.llm.delivery.keyword_extractor import extract_keywords as kw_extract_keywords
+    _KW_EXTRACTOR_AVAILABLE = True
+except Exception:
+    _KW_EXTRACTOR_AVAILABLE = False
+    kw_extract_keywords = None
 
 _TERM_WS_RE = re.compile(r"\s+")
 _TERM_CLEAN_RE = re.compile(r"[^\w가-힣]+")
@@ -102,6 +110,17 @@ def collect_query_keywords(query: str, routing: Dict[str, Any], normalize: bool)
         keywords: List[str] = []
         for key in ("card_names", "actions", "payments", "weak_intents"):
             keywords.extend(matched.get(key) or [])
+        if not keywords and _KW_EXTRACTOR_AVAILABLE and os.getenv("RAG_USE_KEYWORD_EXTRACTOR", "1") != "0":
+            try:
+                kw = kw_extract_keywords(query)
+                keywords.extend(getattr(kw, "card_names", []) or [])
+                keywords.extend(getattr(kw, "actions", []) or [])
+                keywords.extend(getattr(kw, "payments", []) or [])
+                keywords.extend(getattr(kw, "intents", []) or [])
+            except Exception:
+                pass
+        if not keywords:
+            keywords = extract_query_terms(query)
     else:
         keywords = extract_query_terms(query)
     normalized = []
