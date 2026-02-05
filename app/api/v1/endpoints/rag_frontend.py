@@ -19,16 +19,24 @@ def _to_front_card(card):
     if not isinstance(card, dict):
         return {}
     document_type = card.get("documentType") or "general"
+    content = card.get("content")
+    if content in ("", None):
+        content = None
+    full_text = card.get("fullText")
+    if full_text in ("", None):
+        full_text = card.get("detailContent")
+    if full_text in ("", None):
+        full_text = None
     return {
         "id": str(card.get("id") or ""),
         "title": card.get("title") or "",
         "keywords": _ensure_list(card.get("keywords")),
-        "content": card.get("content") or "",
+        "content": content,
         "systemPath": card.get("systemPath") or "",
         "requiredChecks": _ensure_list(card.get("requiredChecks")),
         "exceptions": _ensure_list(card.get("exceptions")),
         "regulation": card.get("regulation") or "",
-        "fullText": card.get("fullText") or card.get("detailContent") or "",
+        "fullText": full_text,
         "time": card.get("time") or "",
         "note": card.get("note") or "",
         "documentType": document_type,
