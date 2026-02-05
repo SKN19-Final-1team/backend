@@ -18,6 +18,8 @@ router = APIRouter()
 class SummaryRequest(BaseModel):
     consultation_id: str
     is_simulation: bool
+    simulation_type: str = None  # 시뮬레이션 난이도
+    original_consultation_id: str = None  # 우수사례 원본 ID
     
 @router.post("")
 async def create_summary(request: SummaryRequest):
@@ -43,12 +45,19 @@ async def create_summary(request: SummaryRequest):
         
         # 비동기 태스크 생성
         summarize_task = get_summarize(script)
+        similarity_result = None
 
         if request.is_simulation:
             feedback_task = generate_feedback(script, EDU_FEEDBACK_SYSTEM_PROMPT)
+
+            # 우수사례 시뮬레이션인 경우 유사도 계산
+            if request.simulation_type == "best_practice" and request.original_consultation_id:
+                similarity_result = await calculate_consultation_similarity(
+                    script, request.original_consultation_id
+                )
         else:
             feedback_task = generate_feedback(script, FEEDBACK_SYSTEM_PROMPT)
-            
+
         # 병렬 실행
         summarize_result, feedback = await asyncio.gather(summarize_task, feedback_task)
         
@@ -58,8 +67,22 @@ async def create_summary(request: SummaryRequest):
         if isinstance(feedback, str):
             raise HTTPException(status_code=500, detail=feedback)
 
-        if not request.is_simulation:
-            # 감정 점수 계산 
+        if request.is_simulation:
+            # 우수사례인 경우 유사도 피드백 추가
+            if request.simulation_type == "best_practice" and similarity_result:
+                similarity_score = similarity_result.get("similarity_score", 0)
+                feedback["similarity_score"] = similarity_score
+
+                # 피드백 텍스트에 유사도 관련 코멘트 추가
+                existing_feedback = feedback.get("feedback", "")
+                if similarity_score >= 80:
+                    feedback["feedback"] = existing_feedback + f" 우수사례 유사도 {similarity_score}%로 우수합니다."
+                elif similarity_score >= 60:
+                    feedback["feedback"] = existing_feedback + f" 우수사례 유사도 {similarity_score}%. 핵심 응대를 더 참고하세요."
+                else:
+                    feedback["feedback"] = existing_feedback + f" 우수사례 유사도 {similarity_score}%. 모범 응대를 학습하세요."
+        else:
+            # 감정 점수 계산 (일반 피드백만)
             emotions = feedback.get('emotions', [])
             score = evaluate_call(emotions)
             feedback["emotion_score"] = score.get("emotion_score", 0)
