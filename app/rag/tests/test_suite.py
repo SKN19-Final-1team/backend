@@ -7,7 +7,7 @@ from app.rag.pipeline import RAGConfig, run_rag
 
 
 # ----------------------------
-# Utilities
+# 유틸리티
 # ----------------------------
 
 def _normalize_ws(s: str) -> str:
@@ -108,7 +108,7 @@ def _contains_any(text: str, terms: List[str]) -> bool:
 
 
 # ----------------------------
-# Test Set (강화 버전)
+# 테스트 세트 (강화 버전)
 # - 기존 필드 유지
 # - 답변 텍스트 검증 추가:
 #   must_have_answer_terms / must_not_have_answer_terms
@@ -362,7 +362,7 @@ GUIDE_TESTS, RAG_TESTS = split_test_sets(TESTS)
 
 
 # ----------------------------
-# Checker
+# 검증
 # ----------------------------
 
 def _check(t: Dict[str, Any], res: Dict[str, Any]) -> Dict[str, Any]:

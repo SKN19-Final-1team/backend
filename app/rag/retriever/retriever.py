@@ -139,8 +139,6 @@ def _is_card_specific_meta(metadata: Dict[str, object]) -> bool:
     return bool(original or card_name)
 
 
-# Router entry
-
 def route_query(query: str) -> Dict[str, Optional[object]]:
     return _route_query(query)
 
@@ -265,7 +263,7 @@ async def retrieve_multi(
                 rows = vector_search(context.query_text, table=safe_table, limit=fetch_k, filters=search_filters)
             return _finish(rows)
         
-        # Intent 기반 검색 (guide 전용)
+        # 의도 기반 검색 (guide 전용)
         intent_only = bool(context.intent_terms or context.weak_terms) and not context.card_terms
         if intent_only and not _is_card_table(safe_table):
             intent_vals = _as_list(search_filters.get("intent", []))
@@ -280,7 +278,7 @@ async def retrieve_multi(
             elif use_vector:
                 rows = vector_search(context.query_text, table=safe_table, limit=fetch_k, filters=search_filters)
             
-            # Loss/theft 쿼리 엄격한 필터
+            # 분실/도난 쿼리 엄격한 필터
             if guide_terms and _should_strict_guide_filter(guide_terms):
                 filtered = [r for r in rows if _row_has_any_term(r, guide_terms)]
                 if filtered:
@@ -342,17 +340,6 @@ async def retrieve_multi(
             fetch_ms = last_fetch_elapsed_ms
             break_hit = db_calls_limit_reached
             guide_quota = max(top_k * 2, top_k + 3)
-            # print(
-            #     f"[retriever] source={source_label} fetch_ms={fetch_ms:.1f} cand_added={len(table_candidates)} "
-            #     f"total_cand={len(candidates)} break_hit={break_hit}"
-            # )
-            if LOG_RETRIEVER_DEBUG:
-                pass
-                # print(
-                #     f"[retriever] source={source_label} rows={len(rows)} "
-                #     f"table_candidates={len(table_candidates)} "
-                #     f"guide_quota={guide_quota} guide_candidates={len(table_candidates)}"
-                # )
         else:
             # 기타 테이블: 일반 검색
             rows = _fetch_rows(safe_table)
@@ -360,14 +347,6 @@ async def retrieve_multi(
             candidates.extend(table_candidates)
             fetch_ms = last_fetch_elapsed_ms
             break_hit = db_calls_limit_reached
-            # print(
-            #     f"[retriever] table={safe_table} fetch_ms={fetch_ms:.1f} cand_added={len(table_candidates)} "
-            #     f"total_cand={len(candidates)} break_hit={break_hit}"
-            # )
-        
-        if LOG_RETRIEVER_DEBUG and table_candidates:
-            pass
-            # print(f"[retriever] table={safe_table} rows={len(rows)} candidates={len(table_candidates)}")
 
     def _doc_key(doc: Dict[str, object]) -> str:
         title = doc.get("title")
@@ -402,13 +381,4 @@ async def retrieve_multi(
         rest = [c for c in candidates if c not in diverse_docs]
         diverse_docs.extend(rest[:max(0, top_k - len(diverse_docs))])
         docs = _finalize_candidates(diverse_docs, _doc_key, context)
-    if LOG_RETRIEVER_DEBUG and docs:
-        top = docs[0]
-        pass
-        # print(
-        #     "[retriever] "
-        #     f"top_title={top.get('title')} "
-        #     f"score={top.get('score')} rrf={top.get('rrf_score')} "
-        #     f"title_score={top.get('title_score')}"
-        # )
     return docs[:top_k]

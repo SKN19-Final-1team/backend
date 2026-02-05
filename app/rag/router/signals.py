@@ -14,6 +14,16 @@ from app.rag.vocab.keyword_dict import (
     get_compound_patterns,
 )
 
+# keyword_extractor 사용 여부 (환경변수로 제어)
+USE_KEYWORD_EXTRACTOR = os.getenv("RAG_USE_KEYWORD_EXTRACTOR", "1") != "0"
+
+try:
+    from app.llm.delivery.keyword_extractor import extract_keywords as kw_extract_keywords
+    KEYWORD_EXTRACTOR_AVAILABLE = True
+except ImportError:
+    KEYWORD_EXTRACTOR_AVAILABLE = False
+    kw_extract_keywords = None
+
 try:
     from rapidfuzz import fuzz, process  # type: ignore
 except Exception:  # pragma: no cover - optional dependency
@@ -404,21 +414,36 @@ def _detect_applepay_intent(normalized: str, payments: List[str]) -> Optional[st
 
 def extract_signals(query: str) -> Signals:
     normalized = _normalize_query(query)
-    card_kp = _ensure_card_kp()
-    card_names = unique_in_order(card_kp.extract_keywords(normalized))
-    actions = unique_in_order(_ACTION_KP.extract_keywords(normalized))
-    payments = unique_in_order(_PAYMENT_KP.extract_keywords(normalized))
-    weak_intents = unique_in_order(_WEAK_INTENT_KP.extract_keywords(normalized))
 
-    if not card_names:
-        card_names = unique_in_order(_fallback_contains(get_card_name_synonyms(), normalized))
-    if not actions:
-        actions = unique_in_order(_fallback_contains(ACTION_SYNONYMS, normalized))
-    if not payments:
-        payments = unique_in_order(_fallback_contains(PAYMENT_SYNONYMS, normalized))
-    if not weak_intents:
-        weak_intents = unique_in_order(_fallback_contains(WEAK_INTENT_SYNONYMS, normalized))
+    # keyword_extractor 사용 (형태소 분석 + STT 오류 교정)
+    if USE_KEYWORD_EXTRACTOR and KEYWORD_EXTRACTOR_AVAILABLE and kw_extract_keywords:
+        kw_result = kw_extract_keywords(query)
+        card_names = list(kw_result.card_names)
+        actions = list(kw_result.actions)
+        payments = list(kw_result.payments)
+        weak_intents = list(kw_result.intents)  # intents → weak_intents
 
+        # STT 오류 교정된 텍스트 사용
+        if kw_result.corrected_text:
+            normalized = _normalize_query(kw_result.corrected_text)
+    else:
+        # 기존 flashtext 기반 추출 (fallback)
+        card_kp = _ensure_card_kp()
+        card_names = unique_in_order(card_kp.extract_keywords(normalized))
+        actions = unique_in_order(_ACTION_KP.extract_keywords(normalized))
+        payments = unique_in_order(_PAYMENT_KP.extract_keywords(normalized))
+        weak_intents = unique_in_order(_WEAK_INTENT_KP.extract_keywords(normalized))
+
+        if not card_names:
+            card_names = unique_in_order(_fallback_contains(get_card_name_synonyms(), normalized))
+        if not actions:
+            actions = unique_in_order(_fallback_contains(ACTION_SYNONYMS, normalized))
+        if not payments:
+            payments = unique_in_order(_fallback_contains(PAYMENT_SYNONYMS, normalized))
+        if not weak_intents:
+            weak_intents = unique_in_order(_fallback_contains(WEAK_INTENT_SYNONYMS, normalized))
+
+    # 카드명 보충 (fuzzy matching - keyword_extractor에서 못 찾은 경우)
     if not card_names:
         synonyms = get_card_name_synonyms()
         card_names = unique_in_order(_card_token_match(normalized, synonyms))
@@ -435,6 +460,7 @@ def extract_signals(query: str) -> Signals:
                 )
             )
 
+    # 액션/결제수단 보충 (fuzzy matching)
     if not actions and len(normalized) >= FUZZY_MIN_LEN and fuzz is not None and process is not None:
         candidates, mapping = _ensure_action_fuzzy()
         actions = unique_in_order(_fuzzy_match(normalized, candidates, mapping))

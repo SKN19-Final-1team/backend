@@ -101,11 +101,19 @@ _CARDNAME_BAD_TOKENS = {
     "연회비",
     "조건",
     "신청",
+    "발급",
     "서류",
     "방법",
     "얼마",
     "한도",
     "할인",
+}
+_CARDNAME_GENERIC_TOKENS = {
+    "카드",
+    "신용",
+    "체크",
+    "직불",
+    "선불",
 }
 
 _KPASS_TERMS = {"k패스", "k-pass", "케이패스"}
@@ -141,9 +149,34 @@ def _is_loss_intent(normalized: str) -> bool:
 
 def _is_plausible_card_name(name: str) -> bool:
     lowered = (name or "").lower()
+    if not lowered:
+        return False
     if any(token in lowered for token in _CARDNAME_BAD_TOKENS):
         return False
+    cleaned = lowered
+    for token in _CARDNAME_GENERIC_TOKENS:
+        cleaned = cleaned.replace(token, "")
+    cleaned = cleaned.replace(" ", "").replace("-", "")
+    if len(cleaned) < 2:
+        return False
     return len(lowered) < 18
+
+
+def _filter_card_names_by_query(normalized_query: str, card_names: list[str]) -> list[str]:
+    compact_query = (normalized_query or "").replace(" ", "").replace("-", "")
+    if not compact_query:
+        return []
+    filtered: list[str] = []
+    for name in card_names:
+        cleaned = (name or "").lower()
+        for token in _CARDNAME_GENERIC_TOKENS:
+            cleaned = cleaned.replace(token, "")
+        cleaned = cleaned.replace(" ", "").replace("-", "")
+        if len(cleaned) < 2:
+            continue
+        if cleaned in compact_query:
+            filtered.append(name)
+    return filtered
 
 
 def _extract_kpass_region(normalized: str) -> Optional[str]:
@@ -182,9 +215,26 @@ def _build_consult_category_candidates(signals: Signals) -> list[str]:
 
 def route_query(query: str) -> Dict[str, Optional[object]]:
     signals = extract_signals(query)
-    force_rule = match_force_rule(signals.normalized)
     normalized = signals.normalized
-    card_names = [name for name in signals.card_names if _is_plausible_card_name(name)]
+    filtered_card_names = [
+        name for name in signals.card_names if _is_plausible_card_name(name)
+    ]
+    filtered_card_names = _filter_card_names_by_query(normalized, filtered_card_names)
+    if filtered_card_names != signals.card_names:
+        signals = Signals(
+            normalized=signals.normalized,
+            card_names=filtered_card_names,
+            actions=signals.actions,
+            payments=signals.payments,
+            weak_intents=signals.weak_intents,
+            pattern_hits=signals.pattern_hits,
+            applepay_intent=signals.applepay_intent,
+            info_hint=signals.info_hint,
+            usage_strong=signals.usage_strong,
+            issuance_hint=signals.issuance_hint,
+        )
+    force_rule = match_force_rule(signals.normalized)
+    card_names = list(signals.card_names)
     actions = list(signals.actions)
     if actions and not _is_loss_intent(normalized):
         actions = [a for a in actions if "분실" not in a and "도난" not in a]
@@ -221,11 +271,12 @@ def route_query(query: str) -> Dict[str, Optional[object]]:
         ).__dict__
 
     if force_rule:
+        db_route = "guide_tbl" if force_rule["route"] == "card_usage" else "card_tbl"
         return RouterResult(
             route=force_rule["route"],
             filters={},
             ui_route=force_rule["route"],
-            db_route="card_tbl",
+            db_route=db_route,
             boost={},
             query_template=None,
             matched={
@@ -306,6 +357,21 @@ def route_query(query: str) -> Dict[str, Optional[object]]:
     for name in filter_card_names:
         if name and name not in matched_card_names:
             matched_card_names.append(name)
+
+    # query_template fallback for common usage intents
+    if not query_template:
+        if "결제일" in normalized:
+            query_template = "결제일 변경"
+        elif "이용한도" in normalized or ("한도" in normalized and "조회" in normalized):
+            query_template = "이용한도 조회"
+        elif "사용내역" in normalized or "이용내역" in normalized:
+            query_template = "사용내역 조회"
+        elif "해지" in normalized or "탈회" in normalized:
+            query_template = "카드 해지"
+        elif "리볼빙" in normalized and ("취소" in normalized or "해지" in normalized):
+            query_template = "리볼빙 해지 취소"
+        elif "주유" in normalized and ("할인" in normalized or "혜택" in normalized):
+            query_template = "주유 할인"
 
     return RouterResult(
         route=ui_route,

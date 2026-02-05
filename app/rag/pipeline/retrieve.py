@@ -42,6 +42,13 @@ def post_filter_docs(query: str, docs: List[Dict[str, Any]]) -> List[Dict[str, A
         title = str(doc.get("title") or "")
         content = str(doc.get("content") or "")
         return f"{title} {content}".lower()
+    
+    def _is_applepay_doc(doc: Dict[str, Any]) -> bool:
+        doc_id = str(doc.get("id") or doc.get("db_id") or "").lower()
+        if "hyundai_applepay" in doc_id:
+            return True
+        text = _doc_text(doc)
+        return any(t in text for t in ("애플페이", "applepay", "apple pay"))
 
     loss_terms = ("분실", "도난", "잃어버", "분실신고")
     loan_terms = ("대출", "현금서비스", "카드대출", "리볼빙", "이자", "수수료")
@@ -101,8 +108,8 @@ def post_filter_docs(query: str, docs: List[Dict[str, Any]]) -> List[Dict[str, A
             if doc_id == "narasarang_faq_006":
                 doc["score"] = float(doc.get("score") or 0.0) + 2.0
 
-    # loan intent
-    if any(t in q for t in loan_terms):
+    # loan intent (skip for cancellation/close flows)
+    if any(t in q for t in loan_terms) and not any(t in q for t in ("취소", "해지", "해제", "철회")):
         filtered = _filter_by_terms(loan_terms, loan_ids)
         if filtered:
             docs = filtered
@@ -110,6 +117,83 @@ def post_filter_docs(query: str, docs: List[Dict[str, Any]]) -> List[Dict[str, A
             doc_id = str(doc.get("id") or doc.get("db_id") or "")
             if doc_id in loan_ids:
                 doc["score"] = float(doc.get("score") or 0.0) + 1.0
+
+    # cancel/usage/limit/billing intents: remove generic fee/terms docs when not asked
+    if any(t in q for t in ("해지", "취소", "사용내역", "이용내역", "거래내역", "결제일", "한도", "조회")):
+        if not any(t in q for t in ("이자", "수수료", "금리", "연체")):
+            fee_terms = ("이자율", "수수료", "거래조건", "카드상품별")
+            filtered = [d for d in docs if not any(t in _doc_text(d) for t in fee_terms)]
+            if filtered:
+                docs = filtered
+
+    # billing day intent
+    if any(t in q for t in ("결제일", "결제일자", "납부일", "청구일")):
+        filtered = _filter_by_terms(
+            (
+                "결제일",
+                "결제일자",
+                "결제예정일",
+                "결제 예정일",
+                "결제일 변경",
+                "결제일 안내",
+                "납부일",
+                "청구일",
+                "청구 예정일",
+            ),
+            set(),
+        )
+        if filtered:
+            docs = filtered
+
+    # limit intent
+    if any(t in q for t in ("한도", "이용한도", "신용한도", "한도조회")):
+        filtered = _filter_by_terms(
+            ("한도", "이용한도", "신용한도", "한도조회", "한도 조회", "한도 상향"),
+            set(),
+        )
+        if filtered:
+            docs = filtered
+
+    # usage history intent
+    if any(t in q for t in ("사용내역", "이용내역", "거래내역", "결제내역")):
+        filtered = _filter_by_terms(
+            ("사용내역", "이용내역", "거래내역", "결제내역", "내역 조회"),
+            set(),
+        )
+        if filtered:
+            docs = filtered
+
+    # cancel/close intent
+    if any(t in q for t in ("해지", "탈회", "해제")):
+        filtered = _filter_by_terms(
+            ("카드 해지", "해지", "탈회", "해제", "회원 탈회", "해지 절차"),
+            set(),
+        )
+        if filtered:
+            docs = filtered
+
+    # revolving intent
+    if any(t in q for t in ("리볼빙", "일부결제")):
+        filtered = _filter_by_terms(
+            (
+                "리볼빙",
+                "일부결제",
+                "일부결제금액이월",
+                "일부결제대금이월약정",
+                "일부결제금액이월약정",
+            ),
+            set(),
+        )
+        if filtered:
+            docs = filtered
+        if any(t in q for t in ("취소", "해지")):
+            filtered = [
+                d
+                for d in docs
+                if any(t in _doc_text(d) for t in ("취소", "해지", "해제", "철회", "중단"))
+            ]
+            if filtered:
+                docs = filtered
 
     # payment intents
     if any(t in q for t in apple_terms):
@@ -121,6 +205,12 @@ def post_filter_docs(query: str, docs: List[Dict[str, Any]]) -> List[Dict[str, A
         ]
         if filtered:
             docs = filtered
+    else:
+        # 비(애플페이) 문의에서 애플페이 문서가 상위로 뜨는 경우 제거
+        if any(t in q for t in ("해지", "사용내역", "이용내역", "한도", "결제일", "리볼빙", "조회", "취소")):
+            filtered = [d for d in docs if not _is_applepay_doc(d)]
+            if filtered:
+                docs = filtered
     if any(t in q for t in samsung_terms):
         filtered = [d for d in docs if any(t in _doc_text(d) for t in samsung_terms)]
         if filtered:
@@ -137,6 +227,37 @@ def post_filter_docs(query: str, docs: List[Dict[str, Any]]) -> List[Dict[str, A
         filtered = [d for d in docs if any(t in _doc_text(d) for t in dcc_terms)]
         if filtered:
             docs = filtered
+
+    # 조회 intent: 조회/확인 문구 포함 문서 우선
+    if "조회" in q:
+        filtered = [d for d in docs if any(t in _doc_text(d) for t in ("조회", "확인"))]
+        if filtered:
+            docs = filtered
+
+    def _apply_term_bias(terms: tuple[str, ...], boost: float, penalty: float) -> None:
+        for doc in docs:
+            text = _doc_text(doc)
+            score = float(doc.get("score") or 0.0)
+            if any(t in text for t in terms):
+                doc["score"] = score + boost
+            else:
+                doc["score"] = score - penalty
+
+    # intent-specific biasing to surface relevant docs
+    if "리볼빙" in q and any(t in q for t in ("취소", "해지")):
+        _apply_term_bias(("취소", "해지", "해제", "철회"), boost=0.6, penalty=0.4)
+        # avoid fee/terms heavy docs when asking to cancel
+        fee_terms = ("거래조건", "이자율", "수수료", "약관")
+        for doc in docs:
+            text = _doc_text(doc)
+            if any(t in text for t in fee_terms):
+                doc["score"] = float(doc.get("score") or 0.0) - 0.8
+    if any(t in q for t in ("해지", "탈회")) and "리볼빙" not in q:
+        _apply_term_bias(("해지", "탈회", "해제"), boost=0.5, penalty=0.3)
+    if any(t in q for t in ("사용내역", "이용내역", "거래내역", "결제내역")):
+        _apply_term_bias(("사용내역", "이용내역", "거래내역", "결제내역"), boost=0.6, penalty=0.4)
+    if "한도" in q and "조회" in q:
+        _apply_term_bias(("한도", "이용한도", "한도조회", "한도 조회"), boost=0.5, penalty=0.3)
 
     return docs
 
@@ -225,13 +346,6 @@ async def retrieve_docs_card_info(
         budget_ms=budget_ms,
         start_ts=start_ts,
     )
-    if log_scores:
-        top1 = docs[0].get("score") if docs else None
-        top2 = docs[1].get("score") if len(docs) > 1 else None
-        # print(
-        #     "[retriever_score] "
-        #     f"mode=lex submode=trgm top1={top1} top2={top2} score_type=trgm"
-        # )
     if not _card_info_should_stop_lex(docs) and _card_info_should_vector(docs):
         if budget_ms is not None and start_ts is not None:
             elapsed_ms = (time.perf_counter() - start_ts) * 1000
@@ -301,6 +415,36 @@ async def retrieve_docs(
         routing_for_retrieve["document_sources"] = ["guide_with_terms"]
         routing_for_retrieve["db_route"] = "guide_tbl"
         routing_for_retrieve.pop("skip_guide_with_terms_query", None)
+
+    # service intents should avoid terms-heavy docs (unless explicitly asking about fees)
+    _SERVICE_INTENT_TERMS = (
+        "해지",
+        "취소",
+        "사용내역",
+        "이용내역",
+        "거래내역",
+        "결제일",
+        "한도",
+        "조회",
+    )
+    _FEE_INTENT_TERMS = ("이자", "수수료", "금리", "연체", "약관", "요율", "거래조건")
+    if (
+        route_name == "card_usage"
+        and any(term in normalized_query for term in _SERVICE_INTENT_TERMS)
+        and not any(term in normalized_query for term in _FEE_INTENT_TERMS)
+    ):
+        if routing_for_retrieve is routing:
+            routing_for_retrieve = dict(routing)
+        routing_for_retrieve["db_route"] = "guide_tbl"
+        routing_for_retrieve["document_sources"] = ["guide_merged", "guide_general"]
+        routing_for_retrieve["exclude_sources"] = ["terms"]
+        filters_copy = dict(routing_for_retrieve.get("filters", {}))
+        exclude_terms = list(filters_copy.get("exclude_title_terms") or [])
+        for term in ("거래조건", "이자율", "수수료", "약관"):
+            if term not in exclude_terms:
+                exclude_terms.append(term)
+        filters_copy["exclude_title_terms"] = exclude_terms
+        routing_for_retrieve["filters"] = filters_copy
     
     sources = set()
     if db_route == "card_tbl":
@@ -342,6 +486,19 @@ async def retrieve_docs(
             "전월",
         ]
         routing_for_retrieve["filters"] = filters_copy
+
+    # 비(애플페이) 문의에서 애플페이 문서 제외
+    if route_name == "card_usage" and not any(t in normalized_query for t in ("애플페이", "apple pay", "applepay")):
+        if any(t in normalized_query for t in ("해지", "사용내역", "이용내역", "한도", "결제일", "리볼빙", "조회", "취소")):
+            if routing_for_retrieve is routing:
+                routing_for_retrieve = dict(routing)
+            filters_copy = dict(routing_for_retrieve.get("filters", {}))
+            exclude_like_any = filters_copy.get("exclude_like_any") or []
+            if not isinstance(exclude_like_any, list):
+                exclude_like_any = list(exclude_like_any)
+            exclude_like_any.extend(["hyundai_applepay%", "%애플페이%", "%apple pay%", "%applepay%"])
+            filters_copy["exclude_like_any"] = exclude_like_any
+            routing_for_retrieve["filters"] = filters_copy
 
     # card_info에서 card_name이 있으면 기본은 card_products, 다만 혜택/실적/할인/통신 등은 guide도 허용
     if route_name == "card_info" and filters.get("card_name"):
@@ -595,9 +752,6 @@ async def retrieve_docs(
     filtered_docs = retrieved_docs
     total_docs = len(filtered_docs)
     elapsed_ms = (time.perf_counter() - start) * 1000
-    # print(
-    #     f"[pipeline_retrieve] retrieve_ms={elapsed_ms:.1f} doc_count={total_docs} route={route_name}"
-    # )
     return filtered_docs
 
 
@@ -621,6 +775,5 @@ async def retrieve_consult_cases(
             categories=categories,
             top_k=top_k,
         )
-    except Exception as exc:
-        # print(f"[pipeline_retrieve][consult] error={exc}")
+    except Exception:
         return []

@@ -3,12 +3,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1.routers import api_router
 from app.llm.delivery.keyword_extractor import warmup
+from app.rag.retriever.db import warmup_embed_cache
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 애플리케이션 시작 시 워밍업 실행 (형태소 분석기 로드 등)
-    # 서버 실행 중 계속 유지되어야 하는 리소스 초기화를 여기서 수행합니다.
-    warmup(silent=True)
+    # 애플리케이션 시작 시 워밍업 실행
+    warmup(silent=True)  # 형태소 분석기 로드
+    warmup_embed_cache()  # 자주 쓰는 쿼리 임베딩 사전 캐싱
     yield
     # 애플리케이션 종료 시 정리 작업 (필요 시)
 

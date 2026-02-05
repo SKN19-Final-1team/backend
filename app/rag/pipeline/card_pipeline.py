@@ -6,7 +6,6 @@ import os
 import re
 import time
 
-## Removed broken import: generate_detail_cards, build_rule_cards (not found in card_generator.py)
 from app.rag.cache.card_cache import (
     CARD_CACHE_ENABLED,
     build_card_cache_key,
@@ -19,7 +18,6 @@ from app.rag.postprocess.cards import omit_empty, promote_definition_doc, split_
 from app.rag.postprocess.keywords import collect_query_keywords, extract_query_terms, normalize_text
 from app.rag.postprocess.sections import clean_card_docs
 
-LOG_TIMING = os.getenv("RAG_LOG_TIMING", "1") != "0"
 _GENERIC_QUERY_TERMS = {
     "카드",
     "혜택",
@@ -116,7 +114,7 @@ def _filter_guide_docs_by_query(docs: List[Dict[str, Any]], query: str) -> Optio
             return filtered
         return None
     filtered = [d for d in guide_docs if _doc_has_any_term(d, hard_terms)]
-    # Drop unrelated benefit docs (e.g. 다자녀) if query doesn't mention them
+    # 쿼리에 없는 혜택 문서 제거 (예: 다자녀)
     q = (query or "").lower()
     if "다자녀" not in q:
         filtered = [
@@ -293,10 +291,6 @@ async def build_card_response(
         cards = []
     current_cards, next_cards = split_cards_by_query(cards, query)
     t_post = time.perf_counter()
-
-    if LOG_TIMING:
-        # RAG timing log disabled
-        pass
 
     return {
         "currentSituation": current_cards,

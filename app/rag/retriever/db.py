@@ -48,6 +48,13 @@ def _escape_pyformat_percent(sql: str) -> str:
 load_dotenv()
 
 _DB_POOL_ENABLED = os.getenv("RAG_DB_POOL", "1") != "0"
+
+# 임베딩 캐시: OpenAI API 호출을 줄여 레이턴시 절감
+_EMBED_CACHE_ENABLED = os.getenv("RAG_EMBED_CACHE", "1") != "0"
+_EMBED_CACHE_TTL = float(os.getenv("RAG_EMBED_CACHE_TTL", "300"))
+_EMBED_CACHE_MAX_SIZE = int(os.getenv("RAG_EMBED_CACHE_MAX_SIZE", "500"))
+_EMBED_CACHE: Dict[str, Tuple[float, List[float]]] = {}
+_EMBED_CACHE_LOCK = threading.Lock()
 _TRGM_ENABLED = os.getenv("RAG_TRGM_RANK", "1") != "0"
 _TRGM_MAX_TERMS = int(os.getenv("RAG_TRGM_MAX_TERMS", "3"))
 _TRGM_MIN_LEN = int(os.getenv("RAG_TRGM_MIN_LEN", "3"))
@@ -131,10 +138,88 @@ def _safe_table(name: str) -> str:
     return name
 
 
+def _prune_embed_cache(now: float) -> None:
+    """만료된 캐시 항목 제거"""
+    if not _EMBED_CACHE:
+        return
+    expired = [k for k, (ts, _) in _EMBED_CACHE.items() if now - ts > _EMBED_CACHE_TTL]
+    for k in expired:
+        _EMBED_CACHE.pop(k, None)
+    # 최대 크기 초과 시 오래된 항목 제거
+    if len(_EMBED_CACHE) > _EMBED_CACHE_MAX_SIZE:
+        sorted_keys = sorted(_EMBED_CACHE.keys(), key=lambda k: _EMBED_CACHE[k][0])
+        for k in sorted_keys[: len(_EMBED_CACHE) - _EMBED_CACHE_MAX_SIZE]:
+            _EMBED_CACHE.pop(k, None)
+
+
 def embed_query(text: str, model: str = "text-embedding-3-small") -> List[float]:
+    cache_key = f"{model}:{text}"
+    now = time.time()
+
+    if _EMBED_CACHE_ENABLED:
+        with _EMBED_CACHE_LOCK:
+            _prune_embed_cache(now)
+            cached = _EMBED_CACHE.get(cache_key)
+            if cached:
+                ts, embedding = cached
+                if now - ts <= _EMBED_CACHE_TTL:
+                    return embedding
+
     client = get_openai_client()
     resp = client.embeddings.create(model=model, input=text)
-    return resp.data[0].embedding
+    embedding = resp.data[0].embedding
+
+    if _EMBED_CACHE_ENABLED:
+        with _EMBED_CACHE_LOCK:
+            _EMBED_CACHE[cache_key] = (now, embedding)
+
+    return embedding
+
+
+# 자주 사용되는 쿼리 목록 (사전 캐싱용)
+_COMMON_QUERIES = [
+    # 분실/도난
+    "카드 분실신고", "카드 분실신고 하려고요", "카드 분실", "카드를 잃어버렸어요",
+    "카드 도난", "카드 도난당했어요 어떻게 해요?", "분실 재발급",
+    # 결제/승인
+    "결제가 안돼요", "결제 오류", "결제일 변경", "결제일 변경하고 싶어요",
+    "결제금액 조회", "이번 달 결제금액 알려주세요",
+    # 한도
+    "카드 한도", "카드 한도 올리고 싶어요", "한도 상향", "한도 조회", "이용한도 조회하려고요",
+    # 수수료/연체
+    "리볼빙 신청", "리볼빙 신청하고 싶어요", "리볼빙 취소", "리볼빙 취소 방법",
+    "연체이자", "연체이자 얼마예요?", "수수료",
+    # 서비스
+    "카드론 신청", "카드론 신청하려고요", "현금서비스", "현금서비스 이용방법",
+    "카드 해지", "카드 해지하려고요", "카드 재발급", "카드 재발급 신청하려고요",
+    "삼성페이 등록", "삼성페이 등록하려고요", "애플페이 등록",
+    # 혜택/정보
+    "카드 혜택", "나라사랑카드 혜택 알려주세요", "카드 추천", "연회비", "발급 조건",
+    "국민행복카드 발급 조건이 뭐예요?", "신용카드 발급하려면 어떻게 해요?",
+    "K-패스 할인 되는 카드 추천해주세요", "주유 할인 카드 있어요?",
+    "마일리지 적립 잘 되는 카드 추천해주세요",
+    # 정부지원
+    "국민행복카드", "국민행복카드 바우처 사용법", "바우처 사용", "K-패스",
+    # 이용내역
+    "이번 달 카드 사용내역 보여주세요",
+    # 복합
+    "나라사랑카드 분실해서 재발급 받고 싶어요", "리볼빙 서비스 신청했는데 취소하고 싶어요",
+]
+
+
+def warmup_embed_cache(queries: List[str] = None) -> int:
+    """자주 사용되는 쿼리의 임베딩을 미리 계산하여 캐시에 저장"""
+    if not _EMBED_CACHE_ENABLED:
+        return 0
+    queries = queries or _COMMON_QUERIES
+    count = 0
+    for query in queries:
+        try:
+            embed_query(query)
+            count += 1
+        except Exception:
+            pass
+    return count
 
 
 def _source_sql(table: str, include_embedding: bool) -> str:
@@ -393,7 +478,6 @@ def vector_search(
                     cur.execute(_escape_pyformat_percent(sql_text), params_list)
                     exec_ms = (time.perf_counter() - exec_start) * 1000
                     rows = cur.fetchall()
-                    # print(f"[retriever_db] table={table} mode=vector exec_ms={exec_ms:.1f} rows={len(rows)}")
                     return rows
 
                 try:
@@ -691,24 +775,14 @@ def text_search(
                 # SQL 및 EXPLAIN 로그: mogrify 결과만 출력, 파싱 없음
                 if _EXPLAIN_ENABLED:
                     try:
-                        explain_sql = cur.mogrify(f"EXPLAIN (ANALYZE, BUFFERS) {sql}", params)
-                        # print(f"[retriever_db][EXPLAIN_SQL] {explain_sql.decode('utf-8')}")
                         cur.execute(f"EXPLAIN (ANALYZE, BUFFERS) {sql}", params)
-                        explain_result = cur.fetchall()
-                        if explain_result:
-                            pass
-                            # print("[retriever_db][EXPLAIN]", "\n".join(str(row[0]) for row in explain_result))
-                        else:
-                            pass
-                            # print("[retriever_db][EXPLAIN] (no result)")
-                    except Exception as exc:
-                        # print(f"[retriever_db][EXPLAIN ERROR] {exc}")
+                        cur.fetchall()
+                    except Exception:
                         conn.rollback()
                 exec_start = time.perf_counter()
                 cur.execute(_escape_pyformat_percent(sql), params)
                 exec_ms = (time.perf_counter() - exec_start) * 1000
                 rows = cur.fetchall()
-                # print(f"[retriever_db] table={table} mode=text submode={submode} exec_ms={exec_ms:.1f} rows={len(rows)}")
                 return rows
 
             results: List[Tuple[object, str, Dict[str, object], float]] = []
