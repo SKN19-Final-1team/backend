@@ -193,6 +193,37 @@ def _extract_query_terms(query: str) -> List[str]:
             continue
         if term in _STOPWORDS_LOWER:
             continue
+        if term.startswith("결제일"):
+            terms.append("결제일")
+        if term.startswith("이용한도"):
+            terms.append("이용한도")
+            terms.append("한도")
+        if term.startswith("한도"):
+            terms.append("한도")
+        if "조회" in term:
+            terms.append("조회")
+        if term.startswith("변경"):
+            terms.append("변경")
+        if term.startswith("취소"):
+            terms.append("취소")
+            terms.append("해지")
+            terms.append("해제")
+            terms.append("철회")
+        if term.startswith("해지") or term.startswith("탈회"):
+            terms.append("해지")
+            terms.append("취소")
+        if term.startswith("사용내역"):
+            terms.append("사용내역")
+            terms.append("이용내역")
+        if term.startswith("이용내역"):
+            terms.append("이용내역")
+            terms.append("사용내역")
+        if "내역" in term:
+            terms.append("내역")
+        if "주유" in term:
+            terms.append("주유")
+        if "할인" in term:
+            terms.append("할인")
         if term.startswith("잃어버"):
             terms.append("잃어버")
         if term.startswith("분실"):

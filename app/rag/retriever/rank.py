@@ -11,24 +11,29 @@ from app.rag.retriever.config import (
 from app.rag.common.text_utils import unique_in_order
 from app.rag.retriever.db import _is_guide_table, text_search
 from app.rag.retriever.terms import SearchContext
+from app.rag.retriever.tuning import get_current_preset, get_tuning_value
 
 USE_VECTOR = os.getenv("RAG_USE_VECTOR", "1") != "0"
 USE_KEYWORD = os.getenv("RAG_USE_KEYWORD", "1") != "0"
 USE_RRF = os.getenv("RAG_USE_RRF", "1") != "0"
 USE_BONUS = os.getenv("RAG_USE_BONUS", "1") != "0"
 
+_PRESET = get_current_preset()
+_VECTOR_WEIGHT = float(get_tuning_value(_PRESET, "vector_weight", "RAG_VECTOR_WEIGHT"))
+_KEYWORD_WEIGHT = float(get_tuning_value(_PRESET, "keyword_weight", "RAG_KEYWORD_WEIGHT"))
+
 _BOOST_ENABLED = (os.getenv("RAG_RRF_BOOST", "1") != "0") and USE_BONUS
-_BOOST_CARD = float(os.getenv("RAG_RRF_BOOST_CARD", "0.2"))
+_BOOST_CARD = float(get_tuning_value(_PRESET, "boost_card", "RAG_RRF_BOOST_CARD"))
 _BOOST_CARD_GUIDE_REDUCE = float(os.getenv("RAG_RRF_BOOST_CARD_REDUCE", "1.0"))
-_BOOST_INTENT = float(os.getenv("RAG_RRF_BOOST_INTENT", "0.15"))
-_BOOST_PAYMENT = float(os.getenv("RAG_RRF_BOOST_PAYMENT", "0.1"))
-_BOOST_WEAK = float(os.getenv("RAG_RRF_BOOST_WEAK", "0.05"))
-_BOOST_CATEGORY = float(os.getenv("RAG_RRF_BOOST_CATEGORY", "0.05"))
-_BOOST_GUIDE = float(os.getenv("RAG_RRF_BOOST_GUIDE", "0.004"))
-_BOOST_GUIDE_COVERAGE = float(os.getenv("RAG_RRF_BOOST_GUIDE_COVERAGE", "0.01"))
-_BOOST_INTENT_TITLE = float(os.getenv("RAG_RRF_BOOST_INTENT_TITLE", "0.02"))
-_PENALTY_CARD_GUIDE = float(os.getenv("RAG_RRF_PENALTY_CARD_GUIDE", "0.06"))
-_CARD_TOP_BONUS = float(os.getenv("RAG_CARD_TOP_BONUS", "0.6"))
+_BOOST_INTENT = float(get_tuning_value(_PRESET, "boost_intent", "RAG_RRF_BOOST_INTENT"))
+_BOOST_PAYMENT = float(get_tuning_value(_PRESET, "boost_payment", "RAG_RRF_BOOST_PAYMENT"))
+_BOOST_WEAK = float(get_tuning_value(_PRESET, "boost_weak", "RAG_RRF_BOOST_WEAK"))
+_BOOST_CATEGORY = float(get_tuning_value(_PRESET, "boost_category", "RAG_RRF_BOOST_CATEGORY"))
+_BOOST_GUIDE = float(get_tuning_value(_PRESET, "boost_guide", "RAG_RRF_BOOST_GUIDE"))
+_BOOST_GUIDE_COVERAGE = float(get_tuning_value(_PRESET, "boost_guide_coverage", "RAG_RRF_BOOST_GUIDE_COVERAGE"))
+_BOOST_INTENT_TITLE = float(get_tuning_value(_PRESET, "boost_intent_title", "RAG_RRF_BOOST_INTENT_TITLE"))
+_PENALTY_CARD_GUIDE = float(get_tuning_value(_PRESET, "penalty_card_guide", "RAG_RRF_PENALTY_CARD_GUIDE"))
+_CARD_TOP_BONUS = float(get_tuning_value(_PRESET, "card_top_bonus", "RAG_CARD_TOP_BONUS"))
 _BOOST_GUIDE_TOKENS = tuple(
     token.strip()
     for token in os.getenv(
@@ -494,14 +499,14 @@ def _build_candidates_from_rows(
         rrf_score = 0.0
         if USE_RRF:
             if key in vec_rank:
-                rrf_score += 1.0 / (RRF_K + vec_rank[key])
+                rrf_score += _VECTOR_WEIGHT / (RRF_K + vec_rank[key])
             if key in kw_rank:
-                rrf_score += 1.0 / (RRF_K + kw_rank[key])
+                rrf_score += _KEYWORD_WEIGHT / (RRF_K + kw_rank[key])
         else:
             if key in vec_docs and USE_VECTOR:
-                rrf_score = float(doc.get("vector_score", 0.0))
+                rrf_score = _VECTOR_WEIGHT * float(doc.get("vector_score", 0.0))
             elif key in kw_rank and USE_KEYWORD:
-                rrf_score = 1.0 / max(1, kw_rank[key])
+                rrf_score = _KEYWORD_WEIGHT * (1.0 / max(1, kw_rank[key]))
         title_score, final_score = _score_candidate(doc, context, rrf_score)
         candidates.append((final_score, title_score, doc))
 

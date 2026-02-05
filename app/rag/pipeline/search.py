@@ -31,7 +31,6 @@ from app.rag.policy.search_gating import decide_search_gating
 from app.rag.policy.answer_class import classify as classify_answer_class
 
 
-LOG_TIMING = os.getenv("RAG_LOG_TIMING", "1") != "0"
 LOG_RETRIEVER_DEBUG = os.getenv("RAG_LOG_RETRIEVER_DEBUG") == "1"
 RETRIEVE_BUDGET_MS = int(os.getenv("RAG_RETRIEVE_BUDGET_MS", "950"))
 RETRIEVE_MAX_STAGES = int(os.getenv("RAG_RETRIEVE_MAX_STAGES", "2"))
@@ -117,14 +116,6 @@ async def run_search(
     if gating.no_search:
         should_search = False
     if not should_search:
-        if LOG_TIMING:
-            total = time.perf_counter() - t_start
-            # print(
-            #     "[rag] "
-            #     f"route={format_ms(t_route - t_start)} "
-            #     f"total={format_ms(total)} "
-            #     f"should_search=False route={routing.get('route')}"
-            # )
         return SearchResult(
             routing=routing,
             docs=[],

@@ -30,6 +30,34 @@ ROUTER_FORCE_RULES = [
         "actions": ["방법", "신청", "절차", "해당"],
         "route": ROUTE_CARD_USAGE,
     },
+    # 카드론/현금서비스 - 서비스 이용 안내
+    {
+        "name": "cardloan_usage",
+        "subjects": ["카드론", "현금서비스", "단기카드대출", "장기카드대출"],
+        "actions": ["신청", "방법", "이용", "한도", "금리", "이자"],
+        "route": ROUTE_CARD_USAGE,
+    },
+    # 모바일페이 등록 - 서비스 이용 안내
+    {
+        "name": "mobilepay_usage",
+        "subjects": ["삼성페이", "애플페이", "카카오페이", "네이버페이", "페이코"],
+        "actions": ["등록", "추가", "연결", "연동", "설정", "방법", "안돼", "오류"],
+        "route": ROUTE_CARD_USAGE,
+    },
+    # 바우처/정부지원 사용 - 서비스 이용 안내
+    {
+        "name": "voucher_usage",
+        "subjects": ["바우처", "아이행복"],
+        "actions": ["사용", "사용법", "이용", "충전", "잔액", "등록"],
+        "route": ROUTE_CARD_USAGE,
+    },
+    # 카드 발급 조건/자격 문의 - 카드 정보 조회
+    {
+        "name": "issuance_info",
+        "subjects": ["발급"],
+        "actions": ["조건", "자격", "요건", "대상", "가능"],
+        "route": ROUTE_CARD_INFO,
+    },
 ]
 
 _BENEFIT_ROUTE_TOKENS = {
@@ -100,7 +128,7 @@ def decide_route(signals: Signals) -> Tuple[str, str, Dict[str, List[str]], Opti
              True,
          )),
         (issuance_hint and not card_names,
-         route_tuple(ROUTE_CARD_INFO, "card_tbl", {"intent": ["발급"]}, "카드 발급 조건", True)),
+         route_tuple(ROUTE_CARD_INFO, "both", {"intent": ["발급"]}, "카드 발급 조건", True)),
         (card_names and actions,
          route_tuple(
              ROUTE_CARD_USAGE,
