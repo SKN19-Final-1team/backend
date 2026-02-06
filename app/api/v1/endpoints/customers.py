@@ -46,6 +46,22 @@ class ApiResponse(BaseModel):
     timestamp: Optional[str] = None
 
 
+class ConsultationHistoryItem(BaseModel):
+    """최근 상담 내역 항목"""
+    id: str
+    title: str
+    date: str
+    category: str
+    status: str
+
+
+class ConsultationHistoryResponse(BaseModel):
+    """최근 상담 내역 응답"""
+    success: bool
+    data: List[ConsultationHistoryItem]
+    message: str
+
+
 # ==============================================================================
 # Helper Functions
 # ==============================================================================
@@ -201,6 +217,100 @@ async def get_customer_by_id(customer_id: str):
         raise HTTPException(
             status_code=500,
             detail=f"고객 정보 조회 중 오류 발생: {str(e)}"
+        )
+    finally:
+        if conn:
+            conn.close()
+
+
+# 카테고리 매핑 (DB ENUM → 한글)
+CATEGORY_MAP = {
+    'card_loss': '카드분실',
+    'overseas_payment': '해외결제',
+    'fee_inquiry': '수수료문의',
+    'points': '포인트',
+    'limit_inquiry': '한도조회',
+    'other': '기타',
+}
+
+# 상태 매핑 (DB ENUM → 한글)
+STATUS_MAP = {
+    'completed': '완료',
+    'in_progress': '진행중',
+    'incomplete': '미완료',
+}
+
+
+@router.get("/{customer_id}/consultations", response_model=ConsultationHistoryResponse)
+async def get_customer_consultations(customer_id: str, limit: int = 3):
+    """
+    고객의 최근 상담 내역 조회
+
+    Args:
+        customer_id: 고객 ID (예: CUST-TEDDY-00001)
+        limit: 조회할 최대 건수 (기본값: 3)
+
+    Returns:
+        ConsultationHistoryResponse: 최근 상담 내역 리스트
+    """
+    conn = None
+    try:
+        conn = get_connection()
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            # 해당 고객의 최근 상담 내역 조회
+            # ⭐ [v24] category → category_main 수정 (DB 스키마와 일치)
+            cur.execute("""
+                SELECT
+                    id,
+                    title,
+                    category_main,
+                    category_raw,
+                    status,
+                    call_date,
+                    call_time
+                FROM consultations
+                WHERE customer_id = %s
+                ORDER BY call_date DESC, call_time DESC
+                LIMIT %s
+            """, (customer_id, limit))
+            rows = cur.fetchall()
+
+            # 결과 변환
+            consultations = []
+            for row in rows:
+                # 날짜/시간 포맷팅
+                call_date = row.get('call_date')
+                call_time = row.get('call_time')
+                if call_date and call_time:
+                    date_str = f"{call_date.strftime('%Y-%m-%d')} {str(call_time)[:5]}"
+                elif call_date:
+                    date_str = call_date.strftime('%Y-%m-%d')
+                else:
+                    date_str = ''
+
+                # 카테고리/상태 한글 변환 (category_main 또는 category_raw 사용)
+                raw_category = row.get('category_main') or row.get('category_raw') or '기타'
+                category = CATEGORY_MAP.get(raw_category, raw_category)
+                status = STATUS_MAP.get(row.get('status'), row.get('status') or '완료')
+
+                consultations.append(ConsultationHistoryItem(
+                    id=row.get('id', ''),
+                    title=row.get('title') or '상담 내역',
+                    date=date_str,
+                    category=category,
+                    status=status,
+                ))
+
+            return ConsultationHistoryResponse(
+                success=True,
+                data=consultations,
+                message=f"최근 상담 내역 {len(consultations)}건 조회 성공"
+            )
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"상담 내역 조회 중 오류 발생: {str(e)}"
         )
     finally:
         if conn:

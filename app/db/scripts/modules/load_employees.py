@@ -2,10 +2,11 @@
 상담사 데이터 적재 모듈
 
 employeesData.json에서 상담사 데이터를 읽어 employees 테이블에 적재
-hire_date 포함
+hire_date, phone 포함
 """
 
 import json
+import random
 from datetime import date
 from psycopg2.extensions import connection as psycopg2_connection
 from psycopg2.extras import execute_batch
@@ -14,6 +15,18 @@ from . import (
     EMPLOYEES_DATA_FILE, BATCH_SIZE,
     check_employees_has_meaningful_data
 )
+
+
+def generate_phone_number(employee_id: str) -> str:
+    """
+    멱등성 있는 전화번호 생성 (010-XXXX-XXXX 형식)
+
+    Employee ID를 seed로 사용하여 동일한 ID는 항상 동일한 전화번호 생성
+    """
+    # Employee ID를 seed로 사용 (hash 값 기반)
+    seed_value = hash(employee_id) % (10**9)
+    rng = random.Random(seed_value)
+    return f"010-{rng.randint(1000, 9999)}-{rng.randint(1000, 9999)}"
 
 
 def load_employees_data(conn: psycopg2_connection):
@@ -66,14 +79,15 @@ def load_employees_data(conn: psycopg2_connection):
 
         insert_employee = """
             INSERT INTO employees (
-                id, name, email, role, department, hire_date, status,
-                consultations, fcr, "avgTime", rank, created_at
+                id, name, email, phone, role, department, hire_date, status,
+                consultations, fcr, "avgTime", rank, trend, created_at
             ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW()
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW()
             )
             ON CONFLICT (id) DO UPDATE SET
                 name = EXCLUDED.name,
                 email = EXCLUDED.email,
+                phone = COALESCE(EXCLUDED.phone, employees.phone),
                 role = EXCLUDED.role,
                 department = EXCLUDED.department,
                 hire_date = COALESCE(EXCLUDED.hire_date, employees.hire_date),
@@ -82,6 +96,7 @@ def load_employees_data(conn: psycopg2_connection):
                 fcr = EXCLUDED.fcr,
                 "avgTime" = EXCLUDED."avgTime",
                 rank = EXCLUDED.rank,
+                trend = COALESCE(EXCLUDED.trend, employees.trend, 'same'),
                 updated_at = NOW()
         """
 
@@ -91,6 +106,8 @@ def load_employees_data(conn: psycopg2_connection):
             emp_id = emp.get('id', '')
             name = emp.get('name', '')
             email = emp.get('email', '')
+            # phone: JSON에 있으면 사용, 없으면 ID 기반으로 생성 (멱등성 보장)
+            phone = emp.get('phone') or generate_phone_number(emp_id)
             team = emp.get('team', '')  # department로 사용
             position = emp.get('position', '')  # role로 사용
             hire_date_str = emp.get('hire_date')
@@ -107,10 +124,14 @@ def load_employees_data(conn: psycopg2_connection):
             avgTime = emp.get('avgTime', '0:00')
             rank = emp.get('rank', 0)
 
+            # trend: JSON에 있으면 사용, 없으면 'same' (나중에 calculate_trends에서 업데이트)
+            trend = emp.get('trend', 'same')
+
             employee_batch.append((
                 emp_id,
                 name,
                 email,
+                phone,  # 전화번호
                 position,  # role
                 team,  # department
                 hire_date_val,  # hire_date
@@ -118,8 +139,28 @@ def load_employees_data(conn: psycopg2_connection):
                 consultations,  # 초기값
                 fcr,  # 초기값
                 avgTime,  # 초기값
-                rank  # 초기값
+                rank,  # 초기값
+                trend  # 초기값 (calculate_trends에서 업데이트)
             ))
+
+        # ADMIN-001 시스템 관리자 추가 (후처리 페이지 등 테스트용)
+        admin_user = (
+            'ADMIN-001',           # id
+            '시스템 관리자',         # name
+            'admin@callact.com',   # email
+            '010-0000-0000',       # phone
+            'admin',               # role
+            '시스템관리',           # department
+            date.today(),          # hire_date
+            'active',              # status
+            0,                     # consultations
+            0,                     # fcr
+            '0:00',                # avgTime
+            0,                     # rank
+            'same'                 # trend
+        )
+        employee_batch.append(admin_user)
+        print(f"[INFO] 시스템 관리자(ADMIN-001) 추가")
 
         # 상담사 적재
         if employee_batch:
