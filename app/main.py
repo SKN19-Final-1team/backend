@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from app.api.v1.routers import api_router
 from app.llm.delivery.keyword_extractor import warmup
 from app.rag.retriever.db import warmup_embed_cache
@@ -37,3 +38,6 @@ app.add_middleware(
 )
 
 app.include_router(api_router, prefix="/api/v1")
+
+# TTS 오디오 파일 정적 서빙
+app.mount("/static", StaticFiles(directory="app/llm/education"), name="static")
