@@ -70,10 +70,12 @@ CREATE TABLE IF NOT EXISTS employees (
     id VARCHAR(50) PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
     email VARCHAR(100) UNIQUE,
+    phone VARCHAR(20),              -- 연락처 (형식: 010-1234-5678)
     role VARCHAR(50),
     department VARCHAR(100),
     hire_date DATE,
     status status_type DEFAULT 'active',
+    trend VARCHAR(10) DEFAULT 'same',  -- 성과 추이 (up/down/same)
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP
 );
@@ -113,10 +115,26 @@ BEGIN
     
     -- rank: 성과 순위 (1부터 시작)
     IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns 
+        SELECT 1 FROM information_schema.columns
         WHERE table_name = 'employees' AND column_name = 'rank'
     ) THEN
         ALTER TABLE employees ADD COLUMN rank INTEGER DEFAULT 0;
+    END IF;
+
+    -- phone: 연락처 (형식: 010-1234-5678)
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'employees' AND column_name = 'phone'
+    ) THEN
+        ALTER TABLE employees ADD COLUMN phone VARCHAR(20);
+    END IF;
+
+    -- trend: 성과 추이 (up/down/same)
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'employees' AND column_name = 'trend'
+    ) THEN
+        ALTER TABLE employees ADD COLUMN trend VARCHAR(10) DEFAULT 'same';
     END IF;
 END $$;
 
@@ -262,15 +280,55 @@ WITH (m = 16, ef_construction = 64);
 
 COMMENT ON INDEX idx_consultation_documents_embedding_hnsw IS 'consultation_documents 임베딩 벡터 인덱스 (HNSW)';
 
--- 8. 성공 메시지 출력
+-- 8. frequent_inquiries 테이블 생성 (자주 찾는 문의)
+CREATE TABLE IF NOT EXISTS frequent_inquiries (
+    id SERIAL PRIMARY KEY,
+    keyword VARCHAR(100) NOT NULL,            -- 짧은 키워드 (예: '카드 분실')
+    question TEXT NOT NULL,                   -- 전체 질문
+    count INT DEFAULT 0,                      -- 문의 건수
+    trend VARCHAR(10) DEFAULT 'same',         -- 추이 (up/down/same)
+    content TEXT,                             -- 상세 설명
+    related_document_id VARCHAR(100),         -- 관련 문서 ID (service_guide_documents 참조)
+    related_document_title VARCHAR(300),      -- 관련 문서 제목
+    related_document_regulation VARCHAR(200), -- 관련 규정
+    related_document_summary TEXT,            -- 관련 문서 요약
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_frequent_inquiries_keyword ON frequent_inquiries(keyword);
+CREATE INDEX IF NOT EXISTS idx_frequent_inquiries_count ON frequent_inquiries(count DESC);
+CREATE INDEX IF NOT EXISTS idx_frequent_inquiries_is_active ON frequent_inquiries(is_active);
+
+COMMENT ON TABLE frequent_inquiries IS '자주 찾는 문의 (대시보드용)';
+
+-- 9. consultations 테이블에 referenced_document_ids 컬럼 추가
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'consultations' AND column_name = 'referenced_document_ids'
+    ) THEN
+        ALTER TABLE consultations ADD COLUMN referenced_document_ids TEXT[];
+        RAISE NOTICE 'consultations.referenced_document_ids 컬럼 추가됨';
+    ELSE
+        RAISE NOTICE 'consultations.referenced_document_ids 컬럼이 이미 존재합니다.';
+    END IF;
+END $$;
+
+COMMENT ON COLUMN consultations.referenced_document_ids IS '상담 중 참조한 문서 ID 배열';
+
+-- 10. 성공 메시지 출력
 DO $$
 BEGIN
     RAISE NOTICE 'DB 설정이 완료되었습니다.';
     RAISE NOTICE '- pgvector 확장 설치됨';
-    RAISE NOTICE '- employees 테이블 생성됨';
-    RAISE NOTICE '- consultations 테이블 생성됨 (category_main, category_sub, category_raw, handled_categories, processing_timeline)';
+    RAISE NOTICE '- employees 테이블 생성됨 (trend 컬럼 포함)';
+    RAISE NOTICE '- consultations 테이블 생성됨 (referenced_document_ids 포함)';
     RAISE NOTICE '- category_mappings 테이블 생성됨 (57개→8+15 매핑)';
     RAISE NOTICE '- consultation_documents 테이블 생성됨';
+    RAISE NOTICE '- frequent_inquiries 테이블 생성됨 (자주 찾는 문의)';
     RAISE NOTICE '- 벡터 인덱스 생성됨';
 END $$;
 
