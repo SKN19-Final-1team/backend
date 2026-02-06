@@ -4,6 +4,68 @@ import uuid
 import json
 
 from app.llm.education.client import generate_text
+from app.llm.education.text_refiner import unmask_text
+
+
+# 페르소나 태그 → TTS instruct 매핑
+_TAG_TO_INSTRUCT = {
+    # 감정
+    "angry": "화가 나서 짜증스럽게 말해",
+    "frustrated": "불만이 있어 답답한 목소리로 말해",
+    "impatient": "급하고 조급한 목소리로 빠르게 말해",
+    "urgent": "다급하게 말해",
+    "confused": "혼란스럽고 불안한 목소리로 말해",
+    # 톤
+    "friendly": "친근하고 밝은 목소리로 말해",
+    "talkative": "수다스럽고 활기차게 말해",
+    "direct": "단호하고 직접적으로 말해",
+    "passive": "무관심하고 건조하게 말해",
+    "disengaged": "지루한 듯 무심하게 말해",
+    "cautious": "조심스럽고 신중하게 말해",
+    "suspicious": "의심하는 듯 경계하며 말해",
+    # 특수
+    "elderly": "천천히 또박또박 말해",
+    "vip": "격식을 차려 정중하게 말해",
+    "foreign": "어눌한 한국어로 천천히 말해",
+    "polite": "공손하고 부드럽게 말해",
+    "emotional": "감정이 풍부하게 말해",
+}
+
+_SPEED_TO_INSTRUCT = {
+    "slow": "천천히 말해",
+    "fast": "빠르게 말해",
+}
+
+
+def build_tts_instruct(customer_profile: Dict[str, Any]) -> str:
+    """페르소나 프로필에서 TTS instruct 문자열 생성"""
+    parts = []
+
+    # personality_tags에서 감정/말투 추출
+    tags = customer_profile.get("personality_tags", [])
+    if isinstance(tags, str):
+        tags = [t.strip() for t in tags.strip("{}").split(",") if t.strip()]
+
+    for tag in tags:
+        desc = _TAG_TO_INSTRUCT.get(tag.strip().lower())
+        if desc:
+            parts.append(desc)
+
+    # communication_style에서 speed 추출
+    comm_style = customer_profile.get("communication_style", {})
+    if isinstance(comm_style, str):
+        import json as _json
+        try:
+            comm_style = _json.loads(comm_style)
+        except Exception:
+            comm_style = {}
+
+    speed = comm_style.get("speed", "")
+    speed_desc = _SPEED_TO_INSTRUCT.get(speed)
+    if speed_desc and speed_desc not in parts:
+        parts.append(speed_desc)
+
+    return ", ".join(parts) if parts else ""
 
 
 # 전역 세션 저장소 (추후 Redis 등으로 대체 가능)
@@ -106,6 +168,10 @@ def process_agent_input(
     if not customer_response:
         customer_response = "죄송합니다, 잘 이해하지 못했습니다. 다시 말씀해주시겠어요?"
 
+    # sLLM 응답 마스킹 해제 (TTS 전 정제)
+    customer_name = session.customer_profile.get("name", "고객")
+    customer_response = unmask_text(customer_response, customer_name=customer_name)
+
     # sLLM 응답을 터미널에 JSON으로 출력
     sllm_response_data = {
         "session_id": session_id,
@@ -135,8 +201,16 @@ def process_agent_input(
         audio_filename = f"response_{session.turn_count:03d}.wav"
         audio_path = f"{output_dir}/{audio_filename}"
         
-        # 음성 설정
+        # 음성 설정 (페르소나 기반 instruct 포함)
         voice_config = session.customer_profile.get("communication_style", {})
+        if isinstance(voice_config, str):
+            import json as _json
+            try:
+                voice_config = _json.loads(voice_config)
+            except Exception:
+                voice_config = {}
+        voice_config = dict(voice_config)
+        voice_config["instruct"] = build_tts_instruct(session.customer_profile)
         
         # TTS 생성
         success = generate_speech(
