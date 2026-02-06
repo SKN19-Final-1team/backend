@@ -11,7 +11,7 @@ try:
 except Exception:
     redis_async = None
 
-CARD_CACHE_TTL_SEC = float(os.getenv("RAG_CARD_CACHE_TTL", "120"))
+CARD_CACHE_TTL_SEC = float(os.getenv("RAG_CARD_CACHE_TTL", "3600"))
 CARD_CACHE_ENABLED = CARD_CACHE_TTL_SEC > 0 and os.getenv("RAG_CARD_CACHE", "1") != "0"
 LOG_CACHE_KEYS = os.getenv("RAG_CACHE_LOG_KEYS", "0") == "1"
 REDIS_URL = os.getenv("RAG_REDIS_URL")

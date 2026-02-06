@@ -213,6 +213,7 @@ async def build_card_response(
     docs = clean_card_docs(docs, query)
     route_name = routing.get("route") or routing.get("ui_route")
     llm_docs = docs
+    rule_docs: List[Dict[str, Any]] = []  # 규칙 기반 카드용 문서
 
     if route_name == "card_usage":
         llm_card_top_n = 1
@@ -230,8 +231,9 @@ async def build_card_response(
         guide_docs = _filter_guide_docs_by_query(docs, query)
         if guide_docs is not None:
             docs = [d for d in docs if d in guide_docs or (d.get("table") == "card_products")]
-        llm_docs = docs
-        llm_card_top_n = max(llm_card_top_n, 3)
+        llm_docs = docs[:2]  # 상위 2개만 LLM
+        rule_docs = docs[2:4]  # 나머지 2개는 규칙 기반
+        llm_card_top_n = 2
         query_terms = extract_query_terms(query)
         if query_terms:
             def _doc_score(doc: Dict[str, Any]) -> int:
@@ -291,6 +293,11 @@ async def build_card_response(
             temperature=0.0,
             max_llm_cards=llm_card_top_n,
         )
+    # card_info인 경우: 나머지 문서는 규칙 기반으로 카드 추가
+    if route_name == "card_info" and rule_docs:
+        rule_cards, _ = build_rule_cards(query, rule_docs, max_cards=2)
+        cards = cards + rule_cards
+
     t_cards = time.perf_counter()
 
     query_keywords = collect_query_keywords(query, routing, config.normalize_keywords)

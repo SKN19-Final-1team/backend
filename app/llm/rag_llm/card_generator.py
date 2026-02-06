@@ -155,11 +155,9 @@ def _build_card_messages(query: str, docs: List[Dict[str, Any]], max_cards: int)
         "- 반드시 JSON만 출력하세요. (코드블록/설명 금지)\n"
         "- 최상위는 배열 또는 {\"cards\": [...]} 둘 중 하나로 출력합니다.\n\n"
         "[카드 필드]\n"
-        "- id, title, keywords, content, systemPath, requiredChecks, exceptions, regulation, fullText, time, note, documentType\n"
-        "- content: 1~2문장 요약(문서 기반). 없으면 null\n"
-        "- fullText: 문서 내용을 가능한 한 그대로(없으면 null)\n"
-        "- requiredChecks/exceptions/keywords: 배열 (없으면 빈 배열)\n"
-        "- 그 외 문자열 필드는 없으면 빈 문자열\n\n"
+        "- id, title, keywords, content (1~2문장 요약)\n"
+        "- requiredChecks/exceptions: 배열 (없으면 빈 배열)\n"
+        "- fullText는 생성하지 마세요 (시스템이 자동 삽입)\n\n"
         "[제약]\n"
         "- 문서에 없는 절차/정책/기간/조건은 절대 만들지 마세요.\n"
         "- 요약은 문서에서 근거가 보이는 내용만 사용하세요.\n"
@@ -205,7 +203,7 @@ def generate_detail_cards(
             model=model,
             messages=messages,
             temperature=temperature,
-            max_tokens=900,
+            max_tokens=500,
             top_p=0.9,
         )
         output = (resp.choices[0].message.content or "").strip()
@@ -218,16 +216,12 @@ def generate_detail_cards(
     if not isinstance(parsed, list):
         return build_rule_cards(query, docs, max_cards=max_llm_cards)
 
-    docs_by_id = {str(d.get("id") or ""): d for d in docs}
-    unused_docs = [d for d in docs if str(d.get("id") or "") not in docs_by_id or str(d.get("id") or "") == ""]
+    # docs 순서대로 매칭 (LLM이 생성한 id는 무시하고 원본 문서 순서 사용)
     cards: List[Dict[str, Any]] = []
-    for item in parsed[:max_llm_cards]:
+    for idx, item in enumerate(parsed[:max_llm_cards]):
         if not isinstance(item, dict):
             continue
-        card_id = str(item.get("id") or "")
-        doc = docs_by_id.get(card_id)
-        if doc is None and unused_docs:
-            doc = unused_docs.pop(0)
+        doc = docs[idx] if idx < len(docs) else None
         base = _doc_to_card_base(doc)
         merged = _merge_card(base, item)
         cards.append(merged)
