@@ -281,16 +281,33 @@ def convert_to_new_consultation_id(
 
 
 # ==============================================================================
-# 평일 영업일 (주말 제외)
+# 평일 영업일 (동적 생성 - 오늘 기준 최근 14 영업일)
 # ==============================================================================
 
-BUSINESS_DAYS = [
-    date(2026, 1, 19),  # 월
-    date(2026, 1, 20),  # 화
-    date(2026, 1, 21),  # 수
-    date(2026, 1, 22),  # 목
-    date(2026, 1, 23),  # 금
-]
+def get_recent_business_days(num_days: int = 14) -> List[date]:
+    """
+    오늘 기준으로 최근 num_days 영업일(주말 제외) 목록을 반환
+    trend 계산을 위해 최근 14일(이번 주 7일 + 저번 주 7일) 포함
+
+    Returns:
+        최근 영업일 리스트 (오래된 날짜 → 최신 날짜 순)
+    """
+    today = date.today()
+    business_days = []
+    current = today
+
+    # 오늘부터 거꾸로 영업일 찾기
+    while len(business_days) < num_days:
+        if current.weekday() < 5:  # 월(0) ~ 금(4)만
+            business_days.append(current)
+        current -= timedelta(days=1)
+
+    # 오래된 날짜 → 최신 날짜 순으로 정렬
+    return sorted(business_days)
+
+
+# 동적 영업일 목록 (스크립트 실행 시점 기준)
+BUSINESS_DAYS = get_recent_business_days(14)
 
 # ==============================================================================
 # 카테고리별 전형적 처리 단계
@@ -709,42 +726,31 @@ def load_hana_data(conn: psycopg2_connection):
             # 고객 ID: 사전 배정된 매핑 사용
             customer_id = consultation_to_customer.get(row_idx, f"CUST-TEDDY-{(row_idx % num_customers) + 1:05d}")
 
-            # 현실적인 날짜/시간 생성 (평일 6일만, 주말 제외)
+            # 현실적인 날짜/시간 생성 (균등 분배)
             call_date = None
             call_time = None
             timestamp_key = None
-            call_start_time_str = row.get("call_start_time")
 
-            if call_start_time_str:
-                try:
-                    dt = datetime.fromisoformat(call_start_time_str.replace("Z", "+00:00"))
-                    call_date = dt.date()
-                    call_time = dt.time()
-                    if call_date.weekday() >= 5:
-                        call_date = BUSINESS_DAYS[row_idx % len(BUSINESS_DAYS)]
-                    timestamp_key = dt.strftime("%Y%m%d%H%M")
-                except:
-                    pass
+            source_id = row.get("source_id", old_consultation_id)
+            try:
+                seed_num = int(re.findall(r'\d+', str(source_id))[-1])
+            except:
+                seed_num = int(hashlib.md5(str(source_id).encode()).hexdigest(), 16) % 100000
 
-            if not call_date or not call_time:
-                source_id = row.get("source_id", old_consultation_id)
-                try:
-                    seed_num = int(re.findall(r'\d+', str(source_id))[-1])
-                except:
-                    seed_num = int(hashlib.md5(str(source_id).encode()).hexdigest(), 16) % 100000
+            # 날짜 균등 분배: seed_num 기반으로 14일 영업일에 고르게 분산
+            day_index = seed_num % len(BUSINESS_DAYS)
+            call_date = BUSINESS_DAYS[day_index]
 
-                day_index = seed_num % len(BUSINESS_DAYS)
-                call_date = BUSINESS_DAYS[day_index]
-
-                hour = 9 + (seed_num // 100) % 9
-                if hour == 12 and (seed_num % 100) < 30:
-                    hour = 9 + (seed_num // 1000) % 8
-                    if hour >= 12:
-                        hour += 1
-                minute = seed_num % 60
-                call_time = time_type(hour, minute, 0)
-
-                timestamp_key = f"{call_date.strftime('%Y%m%d')}{hour:02d}{minute:02d}"
+            # 시간 생성: 9시-18시 (점심시간 12시-13시 제외)
+            # 8시간 근무 (9-12시: 3시간, 13-18시: 5시간 = 총 8시간)
+            hour_slot = seed_num % 8  # 0-7 (8개 슬롯)
+            if hour_slot < 3:
+                hour = 9 + hour_slot  # 9, 10, 11시
+            else:
+                hour = 10 + hour_slot  # 13, 14, 15, 16, 17시
+            minute = seed_num % 60
+            call_time = time_type(hour, minute, 0)
+            timestamp_key = f"{call_date.strftime('%Y%m%d')}{hour:02d}{minute:02d}"
 
             # 카테고리 매핑
             main_category, sub_category, category_raw = map_to_category(category)
@@ -774,7 +780,8 @@ def load_hana_data(conn: psycopg2_connection):
 
             # 시간 충돌 체크
             current_timestamp_key = timestamp_key
-            current_dt = datetime.strptime(timestamp_key, "%Y%m%d%H%M") if timestamp_key else datetime(2026, 1, 20, 9, 0, 0)
+            fallback_date = BUSINESS_DAYS[-1] if BUSINESS_DAYS else date.today()
+            current_dt = datetime.strptime(timestamp_key, "%Y%m%d%H%M") if timestamp_key else datetime.combine(fallback_date, time_type(9, 0, 0))
 
             available_candidates = [
                 aid for aid in candidates

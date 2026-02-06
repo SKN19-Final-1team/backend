@@ -59,6 +59,15 @@ class DiarizationManager:
             # 에러 시 데이터 유실 방지를 위해 원문 보관
             self.global_items.append({"speaker": "unknown", "message": batch_text})
 
+    async def mark_processing_started(self):
+        """처리 시작 상태를 Redis에 저장 (followup API가 대기하도록)"""
+        await self.redis.set(
+            f"stt:{self.session_id}:status",
+            "processing",
+            ex=120  # 2분 후 자동 만료
+        )
+        print(f"[{self.session_id}] Redis 처리 시작 마커 저장")
+
     async def save_to_redis(self):
         """최종 결과를 Redis에 저장"""
         if self.buffer:
@@ -75,9 +84,11 @@ class DiarizationManager:
             self.global_items = await refine_diarized_batch(self.global_items)
             
             await self.redis.set(
-                f"stt:{self.session_id}", 
+                f"stt:{self.session_id}",
                 json.dumps(self.global_items, ensure_ascii=False)
             )
+            # 처리 완료 후 상태 마커 삭제
+            await self.redis.delete(f"stt:{self.session_id}:status")
             print(f"===[{self.session_id}] Redis 최종 저장 완료===")
             print(f"[{self.session_id}] 처리 완료 / 현재 총 {len(self.global_items)}개 발화")
 

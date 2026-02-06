@@ -42,6 +42,8 @@ from modules.load_consultations import load_hana_data
 from modules.update_stats import update_employee_performance, update_customer_consultation_stats
 from modules.load_keywords import load_keyword_dictionary
 from modules.load_teddycard import load_teddycard_data
+from modules.load_frequent_inquiries import load_frequent_inquiries_data
+from modules.calculate_trends import calculate_all_trends
 from modules.generate_mock import generate_mock_simulation_data, generate_mock_audit_data
 from modules.verify import verify_load, print_checklist
 
@@ -104,23 +106,31 @@ def main():
             if not args.skip_teddycard:
                 load_teddycard_data(conn)
 
-            # 6. Mock 데이터 생성 (시뮬레이션, 감사 로그)
+            # 6. 자주 찾는 문의 데이터 적재
+            load_frequent_inquiries_data(conn)
+
+            # 7. Trend 계산 (employees.trend, frequent_inquiries.trend)
+            # 상담 데이터 기반으로 추이 계산
+            calculate_all_trends(conn)
+
+            # 8. Mock 데이터 생성 (시뮬레이션, 감사 로그)
             generate_mock_simulation_data(conn)
             generate_mock_audit_data(conn)
 
-            # 7. 검증
+            # 9. 검증
             verify_load(conn)
 
         print("\n" + "=" * 60)
         print("[SUCCESS] 모든 작업이 완료되었습니다!")
-        print("[12/12] 완료")
+        print("[14/14] 완료")
         print("=" * 60)
         print("\n생성된 테이블:")
-        print("  - 기본: employees, consultations, consultation_documents")
+        print("  - 기본: employees (trend 포함), consultations (referenced_document_ids 포함), consultation_documents")
         print("  - 카테고리: category_mappings (57개 → 8대분류 + 15중분류)")
         print("  - 테디카드: service_guide_documents, card_products, notices")
         print("  - 키워드: keyword_dictionary, keyword_synonyms")
         print("  - 고객: customers, persona_types")
+        print("  - 자주 찾는 문의: frequent_inquiries (trend 포함)")
         print("  - 시뮬레이션: simulation_scenarios, simulation_results, employee_learning_analytics")
         print("  - 감사로그: recording_download_logs, audit_logs")
         print("\n생성된 함수/뷰:")

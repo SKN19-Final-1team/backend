@@ -20,29 +20,30 @@ class SummaryRequest(BaseModel):
     is_simulation: bool
     simulation_type: str = None  # 시뮬레이션 난이도
     original_consultation_id: str = None  # 우수사례 원본 ID
-    
+
 @router.post("")
 async def create_summary(request: SummaryRequest):
     try:
         script = None
         json_script = None
-        
-        # 데이터 확보를 위한 재시도 루프
-        for i in range(10):
+
+        # 데이터 확보를 위한 재시도 루프 (LLM 처리 시간 고려하여 30회로 증가)
+        max_retries = 30
+        for i in range(max_retries):
             script, json_script = await get_dialogue(request.consultation_id)
             if script and len(script.strip()) > 0:
                 print(f"[{request.consultation_id}] {i+1}차 시도만에 데이터 확보 성공")
                 break
-            
-            print(f"[{request.consultation_id}] 데이터 대기 중 ({i+1}/10)")
+
+            print(f"[{request.consultation_id}] 데이터 대기 중 ({i+1}/{max_retries})")
             await asyncio.sleep(1)
 
-        # 10초가 지나도 데이터가 없으면 에러 반환
+        # max_retries초가 지나도 데이터가 없으면 에러 반환
         if not script or len(script.strip()) == 0:
             raise HTTPException(status_code=404, detail="상담 데이터를 찾을 수 없습니다. (처리 지연)")
-        
+
         start_parallel = time.time()
-        
+
         # 비동기 태스크 생성
         summarize_task = get_summarize(script)
         similarity_result = None
@@ -60,7 +61,7 @@ async def create_summary(request: SummaryRequest):
 
         # 병렬 실행
         summarize_result, feedback = await asyncio.gather(summarize_task, feedback_task)
-        
+
         # 결과 검증
         if isinstance(summarize_result, dict) and "error" in summarize_result:
             raise HTTPException(status_code=500, detail=summarize_result["error"])
@@ -130,38 +131,38 @@ class SaveConsultationRequest(BaseModel):
 async def save_consultation(data: SaveConsultationRequest):
     try:
         conn = connect_db()
-        
+
         # 기존 데이터 및 상담 스크립트 확보
         script, _ = await get_dialogue(data.consultationId)
         customer_script = refine_script(script)
         print(f'고객전문 : {customer_script}')
-                
+
         # DB에서 기존 히스토리 조회
         past_history = get_personality_history(conn, data.customerId)
         print(past_history)
-        
+
         # 현재 상담 성향 분석
         current_type_code = await get_personality(customer_script)
-        
+
         # 현재 상담 정보를 DB 예시 포맷에 맞게 객체화
         current_entry = {
             "type_code": current_type_code,
             "assigned_at": datetime.now().strftime("%Y-%m-%d"),
             "consultation_id": data.consultationId
         }
-        
+
         # 히스토리 합치기 및 최종 성향 결정
         total_history = past_history + [current_entry]
         print(total_history)
         final_type_code, updated_history = determine_personality(total_history)
-        
+
         # DB 업데이트
         update_customer(conn, data.customerId, final_type_code, updated_history, False)
 
         # 상담 내역 저장 코드 추가하기
         save_consultation_to_db(conn, data, script, data.evaluation)
         conn.close()
-        
+
         return {
             "isSuccess": True,
             "code": 200,

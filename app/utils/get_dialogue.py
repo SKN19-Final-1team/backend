@@ -5,37 +5,58 @@ import re
 
 redis_client = redis.from_url(DIALOGUE_REDIS_URL, decode_responses=True)
 
-async def get_dialogue(session_id: str):
+async def get_dialogue(session_id: str, check_processing: bool = True):
+    """
+    Redis에서 대화 데이터를 조회합니다.
+
+    Args:
+        session_id: 상담 세션 ID
+        check_processing: True이면 processing 상태도 확인 (데이터 없어도 처리 중이면 대기해야 함)
+
+    Returns:
+        tuple: (formatted_text, json_data) - 데이터 없으면 ("", None)
+    """
     key = f"stt:{session_id}"
-    
+    status_key = f"stt:{session_id}:status"
+
+    # 처리 중인지 확인 (데이터가 없어도 처리 중이면 대기해야 함)
+    if check_processing:
+        status = await redis_client.get(status_key)
+        if status == "processing":
+            print(f"[get_dialogue] Redis key '{key}' 처리 중 (status=processing)")
+            return "", None  # ⭐ 처리 중이면 계속 대기
+
     exists = await redis_client.exists(key)
     if not exists:
-        return ""
+        print(f"[get_dialogue] Redis key '{key}' 없음")
+        return "", None  # ⭐ 항상 tuple 반환
 
     raw_data = await redis_client.get(key)
     if not raw_data:
-        return ""
+        print(f"[get_dialogue] Redis key '{key}' 값이 비어있음")
+        return "", None  # ⭐ 항상 tuple 반환
 
     try:
         data = json.loads(raw_data)
-        
+
         # 화자 매핑 딕셔너리 생성
         speaker_map = {
             "agent": "상담원",
             "customer": "고객"
         }
-        
+
         # 매핑 정보를 사용하여 텍스트 변환
         formatted_text = "\n".join([
-            f"{speaker_map.get(i['speaker'], i['speaker'])}: {i['message']}" 
+            f"{speaker_map.get(i['speaker'], i['speaker'])}: {i['message']}"
             for i in data
         ])
-        
+
+        print(f"[get_dialogue] Redis key '{key}' 데이터 조회 성공: {len(data)}개 발화")
         return formatted_text, data
-    
+
     except Exception as e:
-        print(f"--- Debug: JSON Parsing Error: {e} ---")
-        return ""
+        print(f"[get_dialogue] JSON 파싱 에러: {e}")
+        return "", None  # ⭐ 항상 tuple 반환
 
 
 def refine_script(script):
