@@ -132,7 +132,7 @@ def process_agent_input(
         
         # 오디오 파일 경로 생성
         output_dir = f"app/llm/education/tts_output/{session_id}"
-        audio_filename = f"response_{session.turn_count:03d}.wav"
+        audio_filename = f"response_{session.turn_count:03d}.mp3"
         audio_path = f"{output_dir}/{audio_filename}"
         
         # 음성 설정

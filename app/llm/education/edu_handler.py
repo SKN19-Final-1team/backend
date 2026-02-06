@@ -5,6 +5,7 @@ edu_websocket.py의 수정을 최소화하기 위해
 시뮬레이션 관련 로직을 분리한 모듈입니다.
 """
 import json
+import asyncio
 from typing import Dict, Any, Optional
 from starlette.websockets import WebSocket, WebSocketState
 
@@ -79,8 +80,9 @@ async def handle_agent_message(
         return  # 시뮬레이션 미초기화 시 무시
 
     try:
-        # sLLM 응답 + TTS 생성
-        result = process_agent_input(
+        # ⭐ [v25] sLLM 응답 + TTS 생성 (동기 함수를 스레드 풀에서 실행하여 event loop 차단 방지)
+        result = await asyncio.to_thread(
+            process_agent_input,
             session_id=simulation_session_id,
             agent_message=text,
             input_mode=input_mode
