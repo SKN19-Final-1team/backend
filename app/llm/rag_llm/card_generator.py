@@ -67,26 +67,49 @@ def _summarize_text(text: str, limit: int = 180) -> Optional[str]:
     return truncate(summary, limit) if summary else None
 
 
+_TABLE_DOC_TYPE_MAP = {
+    "card_tbl": "product-spec",
+    "guide_tbl": "guide",
+    "card_products": "product-spec",
+    "service_guide_documents": "guide",
+}
+
+
+def _table_to_doc_type(table: Optional[str]) -> str:
+    return _TABLE_DOC_TYPE_MAP.get(table or "", "general")
+
+
 def _doc_to_card_base(doc: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if not doc:
         return {k: None for k in _CARD_FIELDS}
     meta = doc.get("metadata") or {}
-    raw_content = doc.get("detailContent") or meta.get("full_content") or doc.get("content") or ""
+    # [v25] DB structured JSONB 데이터 활용 (전처리된 카드 표시용 데이터)
+    structured = doc.get("structured") or {}
+    raw_content = (
+        structured.get("detailContent")
+        or doc.get("detailContent")
+        or meta.get("full_content")
+        or doc.get("content")
+        or ""
+    )
     raw_content = str(raw_content)
-    summary = _summarize_text(raw_content)
+    # structured.content가 있으면 이미 정리된 요약이므로 우선 사용
+    summary = structured.get("content") or _summarize_text(raw_content)
     return {
         "id": str(doc.get("id") or meta.get("id") or ""),
-        "title": doc.get("title") or meta.get("title") or "",
+        "title": structured.get("title") or doc.get("title") or meta.get("title") or "",
         "keywords": _ensure_list(doc.get("keywords") or meta.get("keywords")),
         "content": summary,
-        "systemPath": meta.get("systemPath") or meta.get("system_path") or "",
-        "requiredChecks": _ensure_list(meta.get("requiredChecks") or meta.get("required_checks")),
-        "exceptions": _ensure_list(meta.get("exceptions")),
-        "regulation": meta.get("regulation") or "",
+        "systemPath": structured.get("systemPath") or meta.get("systemPath") or meta.get("system_path") or "",
+        "requiredChecks": _ensure_list(
+            structured.get("requiredChecks") or meta.get("requiredChecks") or meta.get("required_checks")
+        ),
+        "exceptions": _ensure_list(structured.get("exceptions") or meta.get("exceptions")),
+        "regulation": structured.get("regulation") or meta.get("regulation") or "",
         "fullText": raw_content.strip() or None,
-        "time": meta.get("time") or "",
-        "note": meta.get("note") or "",
-        "documentType": meta.get("documentType") or doc.get("table") or "general",
+        "time": structured.get("time") or meta.get("time") or "",
+        "note": structured.get("note") or meta.get("note") or "",
+        "documentType": meta.get("documentType") or _table_to_doc_type(doc.get("table")) or "general",
     }
 
 

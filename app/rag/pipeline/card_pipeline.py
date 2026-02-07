@@ -298,6 +298,14 @@ async def build_card_response(
         rule_cards, _ = build_rule_cards(query, rule_docs, max_cards=2)
         cards = cards + rule_cards
 
+    # [v25] 모든 라우트에서 4개 카드 보장: 부족하면 규칙 기반 카드 추가
+    if len(cards) < 4 and route_name != "card_info":
+        used_ids = {id(d) for d in llm_docs}
+        remaining_docs = [d for d in docs if id(d) not in used_ids][:4 - len(cards)]
+        if remaining_docs:
+            extra_rule_cards, _ = build_rule_cards(query, remaining_docs, max_cards=4 - len(cards))
+            cards = cards + extra_rule_cards
+
     t_cards = time.perf_counter()
 
     query_keywords = collect_query_keywords(query, routing, config.normalize_keywords)

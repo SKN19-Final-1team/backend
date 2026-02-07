@@ -256,7 +256,7 @@ def _source_sql(table: str, include_embedding: bool) -> str:
         content_expr = "content"
         metadata_expr = "metadata"
         embedding_expr = "embedding"
-    select_parts = ["id", f"{content_expr} AS content", f"{metadata_expr} AS metadata"]
+    select_parts = ["id", f"{content_expr} AS content", f"{metadata_expr} AS metadata", "structured"]
     if include_embedding:
         select_parts.append(embedding_expr)
     return f"SELECT {', '.join(select_parts)} FROM {actual}"
@@ -272,7 +272,8 @@ def fetch_docs_by_ids(table: str, ids: List[str]) -> List[Dict[str, object]]:
             cur.execute(sql, (ids,))
             rows = cur.fetchall()
     docs: List[Dict[str, object]] = []
-    for doc_id, content, metadata in rows:
+    for row in rows:
+        doc_id, content, metadata, structured = row[0], row[1], row[2], row[3] if len(row) > 3 else None
         meta = metadata if isinstance(metadata, dict) else {}
         title = meta.get("title") or meta.get("name") or meta.get("card_name")
         docs.append(
@@ -282,6 +283,7 @@ def fetch_docs_by_ids(table: str, ids: List[str]) -> List[Dict[str, object]]:
                 "title": title,
                 "content": content or "",
                 "metadata": meta,
+                "structured": structured if isinstance(structured, dict) else None,
                 "table": safe_table,
             }
         )
@@ -467,7 +469,7 @@ def vector_search(
                     "WITH source AS ("
                     f"{_source_sql(table, include_embedding=True)}"
                     ") "
-                    "SELECT id, content, metadata, 1 - (embedding <=> %s) AS score "
+                    "SELECT id, content, metadata, structured, 1 - (embedding <=> %s) AS score "
                     f"FROM source{where_sql} ORDER BY embedding <=> %s LIMIT %s"
                 )
                 params = [emb, *where_params, emb, limit]
@@ -488,7 +490,7 @@ def vector_search(
                         "WITH source AS ("
                         f"{_source_sql(table, include_embedding=True)}"
                         ") "
-                        "SELECT id, content, metadata, 1 - (embedding <-> %s) AS score "
+                        "SELECT id, content, metadata, structured, 1 - (embedding <-> %s) AS score "
                         f"FROM source{where_sql} ORDER BY embedding <-> %s LIMIT %s"
                     )
                     return _execute(sql, params)
@@ -636,13 +638,13 @@ def text_search(
                     source_sql = (
                         "SELECT id, "
                         "COALESCE(name, '') || E'\n\n' || COALESCE(main_benefits, '') || E'\n\n' || COALESCE(performance_condition, '') AS content, "
-                        "metadata FROM " + actual_table
+                        "metadata, structured FROM " + actual_table
                     )
                     with _db_conn() as conn:
                         with conn.cursor() as cur:
                             sql = (
                                 "WITH source AS (" + source_sql + ") "
-                                "SELECT id, content, metadata, 0.0 AS score FROM source "
+                                "SELECT id, content, metadata, structured, 0.0 AS score FROM source "
                                 "WHERE " + terms_clause +
                                 " LIMIT %s"
                             )
@@ -661,14 +663,14 @@ def text_search(
             source_sql = (
                 "SELECT id, "
                 "COALESCE(name, '') || E'\n\n' || COALESCE(main_benefits, '') || E'\n\n' || COALESCE(performance_condition, '') AS content, "
-                "metadata FROM " + actual_table +
+                "metadata, structured FROM " + actual_table +
                 " WHERE id = ANY(%s)"
             )
             with _db_conn() as conn:
                 with conn.cursor() as cur:
                     sql = (
                         "WITH source AS (" + source_sql + ") "
-                        "SELECT id, content, metadata, 0.0 AS score FROM source"
+                        "SELECT id, content, metadata, structured, 0.0 AS score FROM source"
                         + like_clause +
                         " LIMIT %s"
                     )
@@ -678,7 +680,7 @@ def text_search(
                     if not rows and like_clause:
                         # terms 필터로 모두 걸러진 경우 id 후보 전체를 반환
                         cur.execute(
-                            "WITH source AS (" + source_sql + ") SELECT id, content, metadata, 0.0 AS score FROM source LIMIT %s",
+                            "WITH source AS (" + source_sql + ") SELECT id, content, metadata, structured, 0.0 AS score FROM source LIMIT %s",
                             [id_candidates, limit],
                         )
                         rows = cur.fetchall()
@@ -767,7 +769,7 @@ def text_search(
                     "WITH source AS ("
                     + source_sql_text
                     + ") "
-                    + "SELECT id, content, metadata, " + score_expr + " AS score "
+                    + "SELECT id, content, metadata, structured, " + score_expr + " AS score "
                     + "FROM source WHERE " + where_sql + " "
                     + "ORDER BY score DESC LIMIT %s"
                 )

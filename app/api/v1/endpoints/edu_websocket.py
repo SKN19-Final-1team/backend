@@ -39,8 +39,12 @@ async def call_websocket_endpoint(websocket: WebSocket, consultation_id: str = N
     async def on_transcription_result(text: str):
         if not text.strip():
             return
-        
+
         print(f"[{session_id}] STT 원문 : {text}")
+
+        # ⭐ [v25] STT 결과를 프론트엔드로 전송 (call_websocket과 동일)
+        if websocket.client_state == WebSocketState.CONNECTED:
+            await websocket.send_json({"type": "stt", "text": text})
 
         # --- STT 텍스트 적재 ---
         await diarizer_manager.add_fragment(text, DIAR_SYSTEM_PROMPT)
@@ -53,7 +57,7 @@ async def call_websocket_endpoint(websocket: WebSocket, consultation_id: str = N
             # --- RAG 실행 ---
             result = await run_rag(
                 text,
-                config=RAGConfig(top_k=4, normalize_keywords=True),
+                config=RAGConfig(top_k=6, normalize_keywords=True, llm_card_top_n=4),
                 session_state=session_state,
             )
                 
@@ -80,12 +84,16 @@ async def call_websocket_endpoint(websocket: WebSocket, consultation_id: str = N
     finally:
         whisper_service.stop()
         cleanup_session(session_id)
+
+        # 즉시 처리 중 상태 마커를 Redis에 저장 (followup API가 대기하도록)
+        await diarizer_manager.mark_processing_started()
+
         await asyncio.sleep(2)
-        
+
         final_start = time.perf_counter()
         final_script = await diarizer_manager.get_final_script(DIAR_SYSTEM_PROMPT)
         final_end = time.perf_counter()
         test_time = final_end - final_start
-        
+
         print(f"화자 분리 전문 : {final_script}")
         print(f"시간 : {test_time:.4f}s")

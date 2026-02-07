@@ -305,13 +305,19 @@ def _normalize_doc_fields(
 
 
 def _rows_to_docs(
-    rows: List[Tuple[object, str, Dict[str, object], float]],
+    rows: List[Tuple],
     table: str,
     use_vector_score: bool,
 ) -> Tuple[Dict[str, Dict[str, object]], Dict[str, int]]:
     docs: Dict[str, Dict[str, object]] = {}
     ranks: Dict[str, int] = {}
-    for idx, (doc_id, content, metadata, score) in enumerate(rows, 1):
+    for idx, row in enumerate(rows, 1):
+        # 튜플: (id, content, metadata, structured, score) 또는 (id, content, metadata, score)
+        doc_id, content, metadata = row[0], row[1], row[2]
+        if len(row) >= 5:
+            structured, score = row[3], row[4]
+        else:
+            structured, score = None, row[3]
         key = f"{table}:{doc_id}"
         if key in docs:
             continue
@@ -325,6 +331,7 @@ def _rows_to_docs(
             "title": title,
             "content": normalized_content,
             "metadata": normalized_meta,
+            "structured": structured if isinstance(structured, dict) else None,
             "vector_score": float(score) if use_vector_score else 0.0,
             "table": table,
         }
