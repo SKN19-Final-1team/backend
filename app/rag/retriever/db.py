@@ -592,6 +592,7 @@ def text_search(
         actual_table = _resolve_table(table)
         card_values = _as_list(filters.get("card_name"))
         require_card_name_match = bool(filters.get("require_card_name_match"))
+        logger.info(f"[text_search] card_table={actual_table}, card_values={card_values}, terms={terms}")
         if card_values:
             # 1차: normalized card_name 인덱스 기반 후보 추출
             eq_any = [str(v).replace(' ', '').lower() for v in card_values]
@@ -614,6 +615,7 @@ def text_search(
             if not id_candidates:
                 like_any = [f"%{str(v)}%" for v in card_values]
                 no_space_any = [f"%{str(v).replace(' ', '')}%" for v in card_values]
+                logger.info(f"[text_search] Fallback ILIKE: like_any={like_any}, no_space_any={no_space_any}")
                 with _db_conn() as conn:
                     with conn.cursor() as cur:
                         sql = (
@@ -627,6 +629,7 @@ def text_search(
                         )
                         cur.execute(sql, [no_space_any, no_space_any, like_any, like_any, like_any])
                         id_candidates = [row[0] for row in cur.fetchall()]
+                        logger.info(f"[text_search] ILIKE found {len(id_candidates)} candidates")
             # 후보가 없으면 terms 기반 본문(content) 검색을 추가로 시도
             if not id_candidates:
                 if require_card_name_match:
@@ -663,7 +666,8 @@ def text_search(
             source_sql = (
                 "SELECT id, "
                 "COALESCE(name, '') || E'\n\n' || COALESCE(main_benefits, '') || E'\n\n' || COALESCE(performance_condition, '') AS content, "
-                "metadata, structured FROM " + actual_table +
+                "COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('title', name, 'card_name', name, 'name', name) AS metadata, "
+                "structured FROM " + actual_table +
                 " WHERE id = ANY(%s)"
             )
             with _db_conn() as conn:
@@ -679,11 +683,13 @@ def text_search(
                     rows = cur.fetchall()
                     if not rows and like_clause:
                         # terms 필터로 모두 걸러진 경우 id 후보 전체를 반환
+                        logger.info(f"[text_search] Terms filter removed all, returning all {len(id_candidates)} candidates")
                         cur.execute(
                             "WITH source AS (" + source_sql + ") SELECT id, content, metadata, structured, 0.0 AS score FROM source LIMIT %s",
                             [id_candidates, limit],
                         )
                         rows = cur.fetchall()
+            logger.info(f"[text_search] Returning {len(rows)} card_products rows")
             return rows
     
     id_prefix = filters.get("id_prefix")

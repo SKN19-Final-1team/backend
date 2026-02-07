@@ -100,7 +100,7 @@ def _has_any_keyword(text: str, keywords: List[str] | set[str]) -> bool:
 
 
 def _row_has_blocked_term(row: tuple[object, str, Dict[str, object], float], blocked: List[str]) -> bool:
-    _, content, metadata, _ = row
+    _, content, metadata, *_ = row
     meta = metadata if isinstance(metadata, dict) else {}
     title = str(meta.get("title") or meta.get("name") or meta.get("card_name") or "")
     text = f"{title} {content or ''}"
@@ -116,7 +116,7 @@ def _row_has_any_term(
     row: tuple[object, str, Dict[str, object], float],
     terms: List[str],
 ) -> bool:
-    _, content, metadata, _ = row
+    _, content, metadata, *_ = row
     meta = metadata if isinstance(metadata, dict) else {}
     title = str(meta.get("title") or meta.get("name") or meta.get("card_name") or "")
     text = f"{title} {content or ''}".lower()
@@ -158,41 +158,25 @@ async def retrieve_docs(
     top_k: int = 5,
     table: Optional[str] = None,
 ) -> List[Dict[str, object]]:
-    filters = routing.get("filters") or routing.get("boost") or {}
+    # FIXED: 단순 검색 로직 사용 (복잡한 로직 제거, vector search 우선)
+    from app.rag.retriever.simple_retriever import simple_retrieve
+
     route_name = routing.get("route") or routing.get("ui_route")
-    db_route = routing.get("db_route")
-    if route_name == "card_info":
-        # 엔티티 하드 필터: 매칭 실패 시 후보 제거
-        if not _as_list(filters.get("card_name")):
-            lowered = query.lower()
-            for key, canonical in _CARD_INFO_ENTITY_MAP.items():
-                if key in lowered:
-                    filters["card_name"] = [canonical]
-                    break
-        if _as_list(filters.get("card_name")):
-            filters["require_card_name_match"] = True
-        routing["filters"] = filters
-    # APPLEPAY: 애플페이 intent 감지 시 guide 문서만 검색
     applepay_intent = routing.get("applepay_intent")
+
+    # 테이블 선택 (단순화)
     if applepay_intent:
         tables = ["service_guide_documents"]
     elif table is not None:
         tables = [_safe_table(table)]
-    elif db_route == "card_tbl":
-        tables = ["card_products"]
-    elif db_route == "guide_tbl":
-        tables = ["service_guide_documents"]
-    elif db_route == "both":
-        tables = ["card_products", "service_guide_documents"]
-    elif route_name == "card_usage" and not _as_list(filters.get("card_name")):
-        tables = ["service_guide_documents"]
     elif route_name == "card_info":
-        tables = ["card_products"]
-    elif _as_list(filters.get("card_name")):
         tables = ["card_products", "service_guide_documents"]
+    elif route_name == "card_usage":
+        tables = ["service_guide_documents", "card_products"]  # guide 우선
     else:
         tables = ["card_products", "service_guide_documents"]
-    return await retrieve_multi(query=query, routing=routing, tables=tables, top_k=top_k)
+
+    return simple_retrieve(query=query, routing=routing, tables=tables, top_k=top_k)
 
 
 async def retrieve_multi(
@@ -204,7 +188,7 @@ async def retrieve_multi(
     context = _build_search_context(query, routing)
     route_name = routing.get("route") or routing.get("ui_route")
     fetch_k = _fetch_k(top_k)
-    retrieval_mode = routing.get("retrieval_mode") or "keyword_only"
+    retrieval_mode = routing.get("retrieval_mode") or "hybrid"  # FIXED: hybrid를 기본값으로
     use_vector = USE_VECTOR and retrieval_mode != "keyword_only"
     use_keyword = USE_KEYWORD
     if route_name == "card_info":
@@ -271,12 +255,14 @@ async def retrieve_multi(
             guide_terms = _expand_guide_terms(unique_in_order([*intent_vals, *weak_vals]))
             if not guide_terms:
                 guide_terms = _filter_guide_query_terms(context.query_terms)
-            
+
             rows = []
-            if use_keyword:
-                rows = text_search(table=safe_table, terms=guide_terms or context.query_terms, limit=fetch_k, filters=search_filters)
-            elif use_vector:
+            # vector_search 우선 시도
+            if use_vector:
                 rows = vector_search(context.query_text, table=safe_table, limit=fetch_k, filters=search_filters)
+            # 실패 시 text_search
+            if not rows and use_keyword:
+                rows = text_search(table=safe_table, terms=guide_terms or context.query_terms, limit=fetch_k, filters=search_filters)
             
             # 분실/도난 쿼리 엄격한 필터
             if guide_terms and _should_strict_guide_filter(guide_terms):
@@ -294,13 +280,30 @@ async def retrieve_multi(
         
         # 기본 검색
         if _is_card_table(safe_table):
-            rows = vector_search(context.query_text, table=safe_table, limit=fetch_k, filters=search_filters) if use_vector else []
-        else:
-            rows = []
-            if use_keyword:
-                rows = text_search(table=safe_table, terms=context.query_terms, limit=fetch_k, filters=search_filters)
-            if not rows and use_vector:
+            # FIXED: card_products는 embedding이 없어 vector_search 내부에서 text_search로 fallback
+            # use_vector=False여도 vector_search를 호출해야 함
+            if use_vector or use_keyword:
                 rows = vector_search(context.query_text, table=safe_table, limit=fetch_k, filters=search_filters)
+            else:
+                rows = []
+        else:
+            # service_guide_documents 검색: vector_search 우선 (의미 기반), 실패 시 text_search
+            rows = []
+            if use_vector:
+                # vector_search 우선: "나라사랑카드"와 "나라사랑체크카드" 의미적 유사도로 찾음
+                rows = vector_search(context.query_text, table=safe_table, limit=fetch_k, filters=search_filters)
+
+            if not rows and use_keyword:
+                # vector_search 실패 시에만 text_search 시도
+                search_terms = list(context.query_terms)
+                if context.card_values:
+                    # "나라사랑카드" → "나라사랑" 추출 (카드 타입 제거)
+                    _CARD_TYPE_SUFFIXES = re.compile(r'(카드|신용카드|체크카드|직불카드|선불카드)$')
+                    for card_name in context.card_values:
+                        core_name = _CARD_TYPE_SUFFIXES.sub('', card_name).strip()
+                        if core_name and len(core_name) >= 2 and core_name not in search_terms:
+                            search_terms.insert(0, core_name)
+                rows = text_search(table=safe_table, terms=search_terms, limit=fetch_k, filters=search_filters)
         
         if (ENABLE_PRIORITY_TERMS and use_keyword and _is_card_table(safe_table) 
             and context.category_terms and context.search_mode in {"ISSUE", "BENEFIT"}):

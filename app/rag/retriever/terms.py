@@ -185,6 +185,9 @@ def _build_query_text(query: str, query_template: str | None) -> str:
 def _extract_query_terms(query: str) -> List[str]:
     text = _TERM_WS_RE.sub(" ", query.strip().lower())
     raw_terms = [term for term in text.split(" ") if term]
+    # 조사 제거를 위한 패턴
+    _JOSA_PATTERN = re.compile(r'(은|는|이|가|을|를|에|에서|로|으로|와|과|도|만|부터|까지|의|께서|한테|에게)$')
+
     terms = []
     for term in raw_terms:
         if term.isdigit():
@@ -193,6 +196,16 @@ def _extract_query_terms(query: str) -> List[str]:
             continue
         if term in _STOPWORDS_LOWER:
             continue
+
+        # 조사 제거 (3글자 이상일 때만)
+        clean_term = term
+        if len(term) >= 3:
+            clean_term = _JOSA_PATTERN.sub('', term)
+            if clean_term != term and len(clean_term) >= 2:
+                # 조사 제거된 형태도 추가 (우선순위)
+                if clean_term not in terms:
+                    terms.append(clean_term)
+
         if term.startswith("결제일"):
             terms.append("결제일")
         if term.startswith("이용한도"):
@@ -230,7 +243,13 @@ def _extract_query_terms(query: str) -> List[str]:
             terms.append("분실")
         if term.startswith("도난"):
             terms.append("도난")
-        terms.append(term)
+
+        # 원본 term은 조사 제거된 형태가 추가되지 않았을 때만 추가
+        if clean_term == term:
+            terms.append(term)
+        elif term not in terms:
+            terms.append(term)
+
     return unique_in_order(terms)
 
 

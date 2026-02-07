@@ -163,9 +163,19 @@ def _is_plausible_card_name(name: str) -> bool:
 
 
 def _filter_card_names_by_query(normalized_query: str, card_names: list[str]) -> list[str]:
+    """
+    VocabularyMatcher가 이미 fuzzy matching으로 찾은 카드명을
+    쿼리와 최소한의 관련성만 확인 (과도한 필터링 방지)
+    """
     compact_query = (normalized_query or "").replace(" ", "").replace("-", "")
     if not compact_query:
         return []
+
+    # 쿼리에서도 generic tokens 제거하여 핵심 키워드 추출
+    query_cleaned = compact_query
+    for token in _CARDNAME_GENERIC_TOKENS:
+        query_cleaned = query_cleaned.replace(token, "")
+
     filtered: list[str] = []
     for name in card_names:
         cleaned = (name or "").lower()
@@ -174,8 +184,22 @@ def _filter_card_names_by_query(normalized_query: str, card_names: list[str]) ->
         cleaned = cleaned.replace(" ", "").replace("-", "")
         if len(cleaned) < 2:
             continue
-        if cleaned in compact_query:
+
+        # 3가지 조건 중 하나라도 만족하면 통과 (VocabularyMatcher 결과 신뢰)
+        # 1. 양방향 포함 관계
+        if cleaned in compact_query or compact_query in cleaned:
             filtered.append(name)
+        # 2. 핵심 키워드 간 부분 매칭 (최소 3글자)
+        elif len(cleaned) >= 3 and (cleaned in query_cleaned or query_cleaned in cleaned):
+            filtered.append(name)
+        # 3. 공통 부분 문자열이 4글자 이상 (브랜드명 공유)
+        elif len(cleaned) >= 4:
+            # 4글자 이상 공통 부분 확인
+            for i in range(len(cleaned) - 3):
+                if cleaned[i:i+4] in query_cleaned:
+                    filtered.append(name)
+                    break
+
     return filtered
 
 
@@ -238,6 +262,22 @@ def route_query(query: str) -> Dict[str, Optional[object]]:
     actions = list(signals.actions)
     if actions and not _is_loss_intent(normalized):
         actions = [a for a in actions if "분실" not in a and "도난" not in a]
+
+    # FIXED: actions 필터링 후 signals 재생성
+    if actions != signals.actions:
+        signals = Signals(
+            normalized=signals.normalized,
+            card_names=signals.card_names,
+            actions=actions,
+            payments=signals.payments,
+            weak_intents=signals.weak_intents,
+            pattern_hits=signals.pattern_hits,
+            applepay_intent=signals.applepay_intent,
+            info_hint=signals.info_hint,
+            usage_strong=signals.usage_strong,
+            issuance_hint=signals.issuance_hint,
+        )
+
     consult_keyword_hits = _count_domain_keyword_hits(signals.normalized)
     consult_category_candidates = _build_consult_category_candidates(signals)
     need_consult_case_search = bool(
