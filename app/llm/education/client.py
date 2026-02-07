@@ -2,19 +2,25 @@ import os
 import json
 import asyncio
 from typing import Optional, Dict, Any
+from pathlib import Path
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
-load_dotenv()
+# .env 파일 명시적 로드 (CWD 문제 방지)
+# backend/app/llm/education/client.py -> backend/
+current_file_path = Path(__file__).resolve()
+backend_root = current_file_path.parent.parent.parent.parent
+env_path = backend_root / ".env"
+load_dotenv(dotenv_path=env_path)
 
-SIM_RUNPOD_URL = os.getenv("SIM_RUNPOD_URL")
-RUNPOD_API_KEY = os.getenv("RUNPOD_API_KEY")
-RUNPOD_MODEL_NAME = "WindyAle/kanana-nano-2.1B-customer-emotional"
+# 로컬 LLM 서버 설정 (llama.cpp)
+LOCAL_LLM_URL = os.getenv("LOCAL_LLM_URL", "http://localhost:8000/v1")
+LOCAL_LLM_MODEL = os.getenv("LOCAL_LLM_MODEL", "local-model")
 
-# AsyncOpenAI 클라이언트
+# AsyncOpenAI 클라이언트 (llama.cpp OpenAI 호환 API)
 client = AsyncOpenAI(
-    base_url=SIM_RUNPOD_URL,
-    api_key=RUNPOD_API_KEY
+    base_url=LOCAL_LLM_URL,
+    api_key="not-needed"  # 로컬 서버는 API 키 불필요
 )
 
 
@@ -35,7 +41,7 @@ async def generate_text_async(
 
     try:
         response = await client.chat.completions.create(
-            model=RUNPOD_MODEL_NAME,
+            model=LOCAL_LLM_MODEL,
             messages=messages,
             temperature=temperature,
             max_tokens=max_tokens,

@@ -1,7 +1,7 @@
 """
 TTS 엔진 래퍼 모듈
 
-RunPod에 배포된 Qwen3 TTS 서버를 호출하여 텍스트를 음성으로 변환합니다.
+로컬 TTS 서버를 호출하여 텍스트를 음성으로 변환합니다.
 """
 import os
 import requests
@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # RunPod TTS 서버 설정
-TTS_RUNPOD_URL = os.getenv("TTS_RUNPOD_URL", "http://localhost:8000")
+TTS_SERVER_URL = os.getenv("TTS_URL")
 TTS_TIMEOUT = int(os.getenv("TTS_TIMEOUT", "30"))
 
 # 세션 재사용
@@ -26,7 +26,7 @@ def check_server_health() -> bool:
     global _server_available
 
     try:
-        response = _session.get(f"{TTS_RUNPOD_URL}/health", timeout=5)
+        response = _session.get(f"{TTS_SERVER_URL}/health", timeout=5)
         _server_available = response.status_code == 200
         return _server_available
     except Exception as e:
@@ -87,7 +87,7 @@ def generate_speech(
         }
 
         response = _session.post(
-            f"{TTS_RUNPOD_URL}/tts",
+            f"{TTS_SERVER_URL}/tts",
             json=payload,
             timeout=TTS_TIMEOUT
         )
@@ -107,7 +107,7 @@ def generate_speech(
         print(f"[TTS Engine] 서버 타임아웃 ({TTS_TIMEOUT}초)")
         return False
     except requests.exceptions.ConnectionError:
-        print(f"[TTS Engine] 서버 연결 실패: {TTS_RUNPOD_URL}")
+        print(f"[TTS Engine] 서버 연결 실패: {TTS_SERVER_URL}")
         return False
     except Exception as e:
         print(f"[TTS Engine] 음성 생성 실패: {e}")
@@ -121,7 +121,7 @@ def get_model_status() -> Dict[str, Any]:
     TTS 모델 상태 조회
     """
     try:
-        response = _session.get(f"{TTS_RUNPOD_URL}/health", timeout=5)
+        response = _session.get(f"{TTS_SERVER_URL}/health", timeout=5)
         if response.status_code == 200:
             return response.json()
     except Exception:
@@ -129,7 +129,7 @@ def get_model_status() -> Dict[str, Any]:
 
     return {
         "status": "unavailable",
-        "server_url": TTS_RUNPOD_URL
+        "server_url": TTS_SERVER_URL
     }
 
 
@@ -138,7 +138,7 @@ def get_available_speakers() -> list:
     사용 가능한 스피커 목록 조회
     """
     try:
-        response = _session.get(f"{TTS_RUNPOD_URL}/speakers", timeout=5)
+        response = _session.get(f"{TTS_SERVER_URL}/speakers", timeout=5)
         if response.status_code == 200:
             return response.json().get("speakers", [])
     except Exception:
@@ -175,3 +175,4 @@ def save_audio_file(audio_data: bytes, file_path: str) -> bool:
     except Exception as e:
         print(f"[TTS Engine] 파일 저장 실패: {e}")
         return False
+

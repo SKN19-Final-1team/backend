@@ -58,3 +58,5 @@ Thumbs.db
 models/
 *.wav
 *.md
+model_cache/
+tts_output/
