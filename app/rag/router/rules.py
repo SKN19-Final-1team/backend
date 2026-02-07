@@ -99,7 +99,11 @@ def decide_route(signals: Signals) -> Tuple[str, str, Dict[str, List[str]], Opti
     usage_strong = signals.usage_strong
     issuance_hint = signals.issuance_hint
 
+    # DEBUG: 라우팅 입력값 출력
+    print(f"[DEBUG decide_route] card_names={card_names}, actions={actions}, payments={payments}, weak_intents={weak_intents}")
+
     benefit_route_hint = _has_any_term(normalized, _BENEFIT_ROUTE_TOKENS)
+    print(f"[DEBUG decide_route] benefit_route_hint={benefit_route_hint}")
     if not card_names and "국민행복" in normalized:
         card_names = ["국민행복"]
     reissue_intent = any(term in normalized for term in _REISSUE_TOKENS)
@@ -111,6 +115,9 @@ def decide_route(signals: Signals) -> Tuple[str, str, Dict[str, List[str]], Opti
     ui_route, db_route, boost, query_template, should_trigger = route_tuple(ROUTE_CARD_USAGE, "both")
 
     cases = [
+        # 카드명 단독 쿼리 우선 처리 (FIXED: 우선순위 상향)
+        (card_names and not actions and not payments and not weak_intents and not benefit_route_hint,
+         route_tuple(ROUTE_CARD_INFO, "card_tbl", {"card_name": card_names}, f"{first(card_names)} 정보" if card_names else None, True)),
         (reissue_intent and not applepay_intent,
          route_tuple(ROUTE_CARD_USAGE, "guide_tbl", {"intent": ["재발급"]}, None, True)),
         (benefit_route_hint and not applepay_intent,
@@ -178,7 +185,8 @@ def decide_route(signals: Signals) -> Tuple[str, str, Dict[str, List[str]], Opti
             ui_route, db_route, boost, query_template, should_trigger = values
             break
 
-    if single_token_noise or (card_names and not actions and not payments and not weak_intents and len(normalized.split()) == 1):
+    # FIXED: 카드명 단독 쿼리는 유효하므로 노이즈 필터링에서 제외
+    if single_token_noise and not card_names:
         should_search = False
         should_trigger = False
 

@@ -52,6 +52,7 @@ _STRONG_ACTION_TOKENS = {
     "재발행",
     "재교부",
     "분실",
+    "리볼빙",
 }
 
 _INFO_HINT_TERMS = {
@@ -518,9 +519,8 @@ def has_vocab_match(query: str) -> bool:
     if _match_compound_patterns(query):
         return True
 
-    # 카드명은 keyword_dict 기반이 아니라 DB 동의어를 사용하므로,
-    # 필요 시 환경변수로 활성화합니다.
-    if os.getenv("RAG_MATCH_CARD_NAMES", "0") != "0":
+    # FIXED: 카드명도 기본적으로 체크 (환경변수로 비활성화 가능)
+    if os.getenv("RAG_MATCH_CARD_NAMES", "1") != "0":
         card_kp = _ensure_card_kp()
         card_names = unique_in_order(card_kp.extract_keywords(normalized))
         if not card_names:

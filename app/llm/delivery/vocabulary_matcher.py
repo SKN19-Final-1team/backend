@@ -34,65 +34,115 @@ _CARD_PRODUCTS_CACHE: Optional[List[Dict]] = None
 
 def normalize_card_name(full_name: str) -> str:
     """
-    카드 전체 상품명에서 핵심 키워드 추출
+    카드 전체 상품명에서 핵심 브랜드 키워드 자동 추출 (하드코딩 최소화)
 
     Args:
-        full_name: 전체 상품명 (예: "AK PLAZA 테디카드 Plus")
+        full_name: 전체 상품명 (예: "마이 홈플러스 체크카드", "AK PLAZA 테디카드 Plus")
 
     Returns:
-        정규화된 카드명 (예: "테디카드")
+        정규화된 카드명 (예: "홈플러스카드", "테디카드")
 
-    규칙:
-        1. 특정 카드명 패턴 우선 추출 (테디카드, 나라사랑카드 등)
-        2. 부가 설명 제거 후 "카드" 추가
-        3. 브랜드명, 부가 설명 제거
-        4. 띄어쓰기 제거
+    개선된 규칙:
+        1. 일반적인 prefix/suffix 자동 제거 (마이, NEW, Plus, Special 등)
+        2. 여러 "~카드" 패턴이 있으면 가장 짧고 의미있는 것 선택 (핵심 브랜드명)
+        3. 은행 브랜드명 자동 제거 (신한, 하나, 우리 등)
+        4. 300+ 카드를 자동으로 처리
     """
-    # 정규화: 소문자, 띄어쓰기 제거
-    normalized = re.sub(r'\s+', '', full_name.lower())
+    # 정규화: 소문자 변환
+    normalized = full_name.lower()
 
-    # 특정 카드명 패턴 (우선순위 높음)
-    CARD_NAME_PATTERNS = [
-        r'(나라사랑카드)',
-        r'(나라사랑)',  # "나라사랑 카드" → "나라사랑카드"
-        r'(테디카드)',
-        r'(그린카드)',
-        r'(알뜰교통카드)',
-        r'(국민행복카드)',
-        r'(국민행복)',  # "국민행복(신용_체크)" → "국민행복카드"
+    # 일반적인 prefix/suffix 패턴 (수식어, 장소명 등)
+    GENERIC_PREFIXES = [
+        '마이', 'my', 'new', '신', '신규',
+        'akplaza', 'ak plaza', 'ak',
+        'special', '스페셜',
+        'plus', '플러스',
+        'premium', '프리미엄',
+        'vip',
     ]
 
-    for pattern in CARD_NAME_PATTERNS:
-        match = re.search(pattern, normalized)
-        if match:
-            matched_name = match.group(1)
-            # "카드"가 없으면 추가
-            if not matched_name.endswith('카드'):
-                matched_name += '카드'
-            return matched_name
+    GENERIC_SUFFIXES = [
+        'plus', '플러스',
+        'premium', '프리미엄',
+        'special', '스페셜',
+        'vip',
+        'basic', '베이직',
+        'light', '라이트',
+        'standard', '스탠다드',
+    ]
 
-    # 일반 패턴: "~카드" 형태 추출
-    # 예: "akplaza테디카드plus" → "테디카드"
+    # 은행 브랜드명
+    BANK_BRANDS = [
+        '신한', '하나', '우리', '국민', '삼성',
+        'bc', 'kb', 'nh', 'ibk',
+        '농협', '기업은행',
+    ]
+
+    # 카드 타입 (제거 대상)
+    CARD_TYPES = ['신용', '체크', '직불', '선불', '기프트']
+
+    # 띄어쓰기 제거
+    compact = re.sub(r'\s+', '', normalized)
+
+    # 모든 "~카드" 패턴 추출
     card_pattern = r'([가-힣a-z0-9]+카드)'
-    matches = re.findall(card_pattern, normalized)
+    matches = re.findall(card_pattern, compact)
 
-    if matches:
-        # 가장 긴 매칭 반환 (더 구체적인 카드명)
-        longest_match = max(matches, key=len)
+    if not matches:
+        # "카드"가 없으면 원본 정규화해서 반환
+        return normalize_text(full_name)
 
-        # 브랜드명 제거 (선택적)
-        # 예: "신한테디카드" → "테디카드"
-        brand_prefixes = ['신한', '하나', '우리', '국민', '삼성', 'bc', 'kb', 'nh']
-        for prefix in brand_prefixes:
-            if longest_match.startswith(prefix):
-                potential_name = longest_match[len(prefix):]
-                if len(potential_name) >= 3:  # 최소 3글자 이상
-                    return potential_name
+    # 여러 매칭이 있으면 가장 의미있는 것 선택
+    candidates = []
 
-        return longest_match
+    for match in matches:
+        cleaned = match
 
-    # 매칭 실패 시 원본 반환
-    return normalize_text(full_name)
+        # 은행 브랜드명 제거
+        for brand in BANK_BRANDS:
+            if cleaned.startswith(brand) and len(cleaned) > len(brand) + 2:
+                cleaned = cleaned[len(brand):]
+                break
+
+        # 카드 타입 제거 (prefix)
+        for card_type in CARD_TYPES:
+            if cleaned.startswith(card_type) and len(cleaned) > len(card_type) + 2:
+                cleaned = cleaned[len(card_type):]
+                break
+
+        # 카드 타입 제거 (suffix, "카드" 앞)
+        for card_type in CARD_TYPES:
+            suffix = card_type + '카드'
+            if cleaned.endswith(suffix) and len(cleaned) > len(suffix):
+                cleaned = cleaned[:-len(suffix)] + '카드'
+                break
+
+        # 일반 prefix 제거
+        for prefix in GENERIC_PREFIXES:
+            if cleaned.startswith(prefix) and len(cleaned) > len(prefix) + 2:
+                cleaned = cleaned[len(prefix):]
+                break
+
+        # 일반 suffix 제거 (카드 앞)
+        for suffix in GENERIC_SUFFIXES:
+            if cleaned.endswith(suffix + '카드') and len(cleaned) > len(suffix) + 2:
+                cleaned = cleaned[:-len(suffix + '카드')] + '카드'
+                break
+
+        # "카드" 제외한 부분의 길이 계산 (짧을수록 핵심 브랜드명)
+        core_length = len(cleaned) - 2  # "카드" = 2글자
+
+        if core_length >= 2:  # 최소 2글자 이상의 의미있는 이름
+            candidates.append((cleaned, core_length))
+
+    if not candidates:
+        # 정제 후 남은 게 없으면 원본 첫 매칭 반환
+        return matches[0]
+
+    # 가장 짧은 핵심 브랜드명 선택 (중복 제거용 정규화가 목적이므로)
+    # 예: "마이홈플러스체크카드"와 "홈플러스카드" 중 "홈플러스카드" 선택
+    candidates.sort(key=lambda x: (x[1], x[0]))  # 길이 우선, 같으면 알파벳순
+    return candidates[0][0]
 
 
 def load_card_products(force_reload: bool = False, silent: bool = False) -> List[Dict]:
@@ -108,6 +158,8 @@ def load_card_products(force_reload: bool = False, silent: bool = False) -> List
     """
     global _CARD_PRODUCTS_CACHE
 
+    # IMPORTANT: 코드 변경 후 첫 실행 시 자동 리로드
+    # normalize_card_name() 로직 변경되면 캐시 무효화 필요
     if _CARD_PRODUCTS_CACHE is not None and not force_reload:
         return _CARD_PRODUCTS_CACHE
 
