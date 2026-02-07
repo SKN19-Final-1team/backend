@@ -20,6 +20,7 @@ import os
 import sys
 import time
 import tempfile
+import requests
 from pathlib import Path
 
 # 프로젝트 루트 추가
@@ -31,7 +32,12 @@ load_dotenv()
 
 from app.llm.education.persona_generator import create_system_prompt
 from app.llm.education.client import generate_text
-from app.llm.education.tts_engine import generate_speech, check_server_health
+from app.llm.education.tts_engine import check_server_health
+from app.llm.education.tts_speaker import build_tts_instruct
+from app.llm.education.text_refiner import unmask_text
+
+TTS_RUNPOD_URL = os.getenv("TTS_RUNPOD_URL", "http://localhost:8000")
+_session = requests.Session()
 
 
 def check_servers():
@@ -93,7 +99,7 @@ def create_test_persona():
     return system_prompt, customer_profile
 
 
-def chat_with_sllm(system_prompt: str, agent_message: str):
+def chat_with_sllm(system_prompt: str, agent_message: str, customer_name: str = "김민수"):
     """sLLM과 대화"""
     print("\n" + "=" * 60)
     print("   Step 2: sLLM 대화")
@@ -116,62 +122,64 @@ def chat_with_sllm(system_prompt: str, agent_message: str):
     if not customer_response:
         customer_response = "죄송합니다, 잘 이해하지 못했습니다."
 
-    print(f"sLLM 응답 ({elapsed:.2f}초): \"{customer_response}\"")
+    print(f"sLLM 원본 ({elapsed:.2f}초): \"{customer_response}\"")
+
+    # 마스킹 해제
+    customer_response = unmask_text(customer_response, customer_name=customer_name)
+    print(f"정제 후: \"{customer_response}\"")
 
     return customer_response
 
 
-def generate_and_play_tts(text: str, session_id: str = "test", turn: int = 1):
-    """TTS 생성 및 재생"""
+def generate_and_play_tts(text: str, customer_profile: dict = None):
+    """RunPod TTS 서버 호출 후 바로 재생 (로컬 저장 없음)"""
     print("\n" + "=" * 60)
     print("   Step 3: TTS 생성 및 재생")
     print("=" * 60)
 
-    # 출력 경로 설정
-    output_dir = tempfile.gettempdir()
-    audio_filename = f"tts_test_{session_id}_{turn:03d}.mp3"
-    audio_path = os.path.join(output_dir, audio_filename)
+    # 페르소나 기반 instruct 생성
+    instruct = ""
+    if customer_profile:
+        instruct = build_tts_instruct(customer_profile)
 
-    # 음성 설정
-    voice_config = {
-        "speaker": "Sohee",
+    payload = {
+        "text": text,
         "language": "Korean",
-        "speed": "moderate"
+        "speaker": "Eric",
+        "instruct": instruct
     }
 
     print(f"TTS 변환 텍스트: \"{text}\"")
-    print(f"음성 설정: {voice_config}")
+    print(f"instruct: \"{instruct}\"")
     print("TTS 생성 중...")
 
     start_time = time.time()
 
-    success = generate_speech(
-        text=text,
-        voice_config=voice_config,
-        output_path=audio_path
-    )
+    try:
+        response = _session.post(f"{TTS_RUNPOD_URL}/tts", json=payload, timeout=60)
 
-    elapsed = time.time() - start_time
+        if response.status_code != 200:
+            print(f"[FAIL] TTS API 오류 ({response.status_code})")
+            return False
 
-    if success:
-        print(f"[OK] TTS 생성 완료 ({elapsed:.2f}초)")
-        print(f"파일 경로: {audio_path}")
+        elapsed = time.time() - start_time
+        audio_data = response.content
 
-        # 파일 크기 확인
-        file_size = os.path.getsize(audio_path)
-        print(f"파일 크기: {file_size:,} bytes")
+        print(f"[OK] TTS 생성 완료 ({elapsed:.2f}초, {len(audio_data):,} bytes)")
 
-        # 오디오 재생 (Windows)
-        print("\n[PLAY] 오디오 재생 중...")
+        # 임시 파일로 재생 후 삭제
+        tmp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
+        tmp.write(audio_data)
+        tmp.close()
+
+        print("[PLAY] 오디오 재생 중...")
         if os.name == 'nt':
-            os.system(f'start "" "{audio_path}"')
-        else:
-            print(f"재생하려면: play {audio_path}")
+            os.system(f'start "" "{tmp.name}"')
+        return True
 
-        return audio_path
-    else:
-        print(f"[FAIL] TTS 생성 실패")
-        return None
+    except Exception as e:
+        print(f"[FAIL] TTS 오류: {e}")
+        return False
 
 
 def run_conversation_test():
@@ -209,13 +217,15 @@ def run_conversation_test():
             continue
 
         # sLLM 응답 생성
-        customer_response = chat_with_sllm(system_prompt, agent_input)
+        customer_response = chat_with_sllm(
+            system_prompt, agent_input,
+            customer_name=customer_profile.get("name", "고객")
+        )
 
-        # TTS 생성 및 재생
+        # TTS 생성 및 재생 (페르소나 감정 반영)
         generate_and_play_tts(
             text=customer_response,
-            session_id="conversation_test",
-            turn=turn
+            customer_profile=customer_profile
         )
 
         turn += 1
@@ -236,14 +246,10 @@ def run_single_tts_test():
 
     test_text = "안녕하세요, 저는 테디카드 고객센터입니다. 무엇을 도와드릴까요?"
 
-    audio_path = generate_and_play_tts(
-        text=test_text,
-        session_id="single_test",
-        turn=1
-    )
+    success = generate_and_play_tts(text=test_text)
 
-    if audio_path:
-        print(f"\n[OK] 단일 TTS 테스트 완료: {audio_path}")
+    if success:
+        print(f"\n[OK] 단일 TTS 테스트 완료")
 
 
 def interactive_mode():
@@ -278,8 +284,7 @@ def interactive_mode():
         # TTS 생성 및 재생
         generate_and_play_tts(
             text=customer_response,
-            session_id="interactive",
-            turn=turn
+            customer_profile=customer_profile
         )
 
         turn += 1

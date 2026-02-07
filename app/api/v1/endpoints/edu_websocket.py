@@ -78,7 +78,7 @@ async def call_websocket_endpoint(websocket: WebSocket, consultation_id: str = N
             elif "text" in message:
                 await handle_json_message(session_id, message["text"], websocket, session_state)
 
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, RuntimeError):
         pass
     
     finally:
