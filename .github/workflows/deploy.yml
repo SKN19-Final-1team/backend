@@ -1,0 +1,44 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches: ["main"]
+
+concurrency:
+  group: deploy-main
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          port: ${{ secrets.EC2_PORT }}
+          script: |
+            set -euo pipefail
+            cd /opt/callact-backend
+
+            git fetch --all
+            git checkout main
+            git pull --rebase
+
+            cat <<'YAML' > docker-compose.prod.override.yml
+            services:
+              app:
+                command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+              nginx:
+                healthcheck:
+                  test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1/nginx-health"]
+                  interval: 30s
+                  timeout: 10s
+                  retries: 3
+            YAML
+
+            sudo docker compose -f docker-compose.prod.yml -f docker-compose.prod.override.yml up -d --build
+            sudo docker image prune -f
+            sudo docker builder prune -af || true

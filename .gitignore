@@ -28,6 +28,9 @@ docker-compose.override.yml
 .vscode/
 .claude/
 .github/
+!.github/
+!.github/workflows/
+!.github/workflows/**
 .claude/
 .idea/
 *.swp
