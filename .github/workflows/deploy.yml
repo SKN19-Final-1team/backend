@@ -25,7 +25,7 @@ jobs:
 
             git fetch --all
             git checkout main
-            git pull --rebase
+            git reset --hard origin/main
 
             cat <<'YAML' > docker-compose.prod.override.yml
             services:
