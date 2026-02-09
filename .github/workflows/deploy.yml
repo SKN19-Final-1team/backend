@@ -40,5 +40,6 @@ jobs:
                   retries: 3
             YAML
 
+            sudo docker compose -f docker-compose.prod.yml -f docker-compose.prod.override.yml down --rmi local || true
             sudo DOCKER_BUILDKIT=1 docker compose -f docker-compose.prod.yml -f docker-compose.prod.override.yml up -d --build
             sudo docker image prune -f
