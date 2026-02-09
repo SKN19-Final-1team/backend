@@ -21,12 +21,17 @@ router = APIRouter()
 # ==============================================================================
 
 class ReferencedDocument(BaseModel):
-    """참조 문서 (Frontend 스키마 호환)"""
+    """참조 문서 (Frontend 스키마 호환) - Phase B 확장"""
     stepNumber: Optional[int] = None       # RAG 조회 순서
-    documentId: str                        # DOC-123
+    documentId: str                        # 원본 DB ID
     title: Optional[str] = ""              # 제목 (없으면 빈 문자열)
     used: Optional[bool] = False           # 클릭 여부
     viewCount: Optional[int] = 0           # 조회 횟수
+    # Phase B 확장 필드 (모두 Optional → 하위 호환)
+    documentType: Optional[str] = None     # terms/faq/guide/product-spec
+    sourceTable: Optional[str] = None      # card_products/service_guide_documents 등
+    category: Optional[str] = None         # 분실/도난, 결제/승인 등
+    relevanceScore: Optional[int] = None   # RAG 관련도 점수 (0-100)
 
 
 class ProcessingTimelineItem(BaseModel):

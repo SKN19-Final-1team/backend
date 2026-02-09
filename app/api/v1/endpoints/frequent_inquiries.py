@@ -19,11 +19,13 @@ router = APIRouter()
 # ==============================================================================
 
 class RelatedDocumentResponse(BaseModel):
-    """관련 문서 응답 모델"""
-    document_id: str
+    """관련 문서 응답 모델 (Phase B: camelCase 통일)"""
+    documentId: str
     title: str
     regulation: Optional[str] = None
     summary: Optional[str] = None
+    sourceTable: Optional[str] = None
+    documentType: Optional[str] = None
 
 
 class FrequentInquiryResponse(BaseModel):
@@ -54,10 +56,12 @@ def row_to_response(row: dict) -> FrequentInquiryResponse:
     related_doc = None
     if row.get('related_document_id'):
         related_doc = RelatedDocumentResponse(
-            document_id=row.get('related_document_id', ''),
+            documentId=row.get('related_document_id', ''),
             title=row.get('related_document_title', ''),
             regulation=row.get('related_document_regulation'),
-            summary=row.get('related_document_summary')
+            summary=row.get('related_document_summary'),
+            sourceTable=row.get('related_source_table'),
+            documentType=row.get('related_document_type'),
         )
 
     return FrequentInquiryResponse(

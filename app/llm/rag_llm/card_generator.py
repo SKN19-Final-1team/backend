@@ -43,6 +43,7 @@ _CARD_FIELDS = (
     "time",
     "note",
     "documentType",
+    "sourceTable",
 )
 
 
@@ -95,6 +96,8 @@ def _doc_to_card_base(doc: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     raw_content = str(raw_content)
     # structured.content가 있으면 이미 정리된 요약이므로 우선 사용
     summary = structured.get("content") or _summarize_text(raw_content)
+    # sourceTable: 원본 DB 테이블명 (문서 재조회용)
+    raw_table = str(doc.get("table") or meta.get("source_table") or "")
     return {
         "id": str(doc.get("id") or meta.get("id") or ""),
         "title": structured.get("title") or doc.get("title") or meta.get("title") or "",
@@ -109,7 +112,8 @@ def _doc_to_card_base(doc: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         "fullText": raw_content.strip() or None,
         "time": structured.get("time") or meta.get("time") or "",
         "note": structured.get("note") or meta.get("note") or "",
-        "documentType": meta.get("documentType") or _table_to_doc_type(doc.get("table")) or "general",
+        "documentType": meta.get("documentType") or meta.get("document_type") or _table_to_doc_type(raw_table) or "general",
+        "sourceTable": raw_table,
     }
 
 
@@ -131,7 +135,7 @@ def _merge_card(base: Dict[str, Any], overlay: Dict[str, Any]) -> Dict[str, Any]
         if merged.get(key) in ("", None):
             merged[key] = None
     # keep strings for others
-    for key in ("title", "systemPath", "regulation", "time", "note", "documentType", "id"):
+    for key in ("title", "systemPath", "regulation", "time", "note", "documentType", "id", "sourceTable"):
         if merged.get(key) is None:
             merged[key] = ""
     return merged

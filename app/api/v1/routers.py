@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1.endpoints import call_websocket, followup, education, edu_websocket, rag_frontend, customers, notices, employees, consultations, frequent_inquiries, health
+from app.api.v1.endpoints import call_websocket, followup, education, edu_websocket, rag_frontend, customers, notices, employees, consultations, frequent_inquiries, health, settings, documents
 
 api_router = APIRouter()
 
@@ -24,6 +24,12 @@ api_router.include_router(consultations.router, prefix="/consultations", tags=["
 
 # 자주 찾는 문의 API
 api_router.include_router(frequent_inquiries.router, prefix="/frequent-inquiries", tags=["frequent-inquiries"])
+
+# 문서 상세 조회 API (Phase B)
+api_router.include_router(documents.router, prefix="/documents", tags=["documents"])
+
+# 개발자 설정 (STT/TTS 엔진 전환)
+api_router.include_router(settings.router, prefix="/settings", tags=["settings"])
 
 # 헬스체크
 api_router.include_router(health.router, tags=["health"])

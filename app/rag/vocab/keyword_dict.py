@@ -46,17 +46,37 @@ PAYMENT_SYNONYMS: Dict[str, List[str]] = {
 PAYMENT_ALLOWLIST = set(PAYMENT_SYNONYMS.keys())
 
 # 약한 의도 단독 등장 시 기본 라우팅 힌트
+# Phase A 확장: 5개 → 20개 (Vocab Gate 25-35% 차단률 해소)
 WEAK_INTENT_ROUTE_HINTS = {
+    # 기존 5개
     "혜택": ROUTE_CARD_INFO,
     "발급": ROUTE_CARD_USAGE,
     "신청": ROUTE_CARD_USAGE,
     "사용": ROUTE_CARD_USAGE,
     "사용처": ROUTE_CARD_USAGE,
+    # 조회/확인 계열
+    "조회": ROUTE_CARD_USAGE,
+    "확인": ROUTE_CARD_USAGE,
+    "안내": ROUTE_CARD_INFO,
+    "상담": ROUTE_CARD_USAGE,
+    # 변경/해지 계열
+    "변경": ROUTE_CARD_USAGE,
+    "해지": ROUTE_CARD_USAGE,
+    "취소": ROUTE_CARD_USAGE,
+    "등록": ROUTE_CARD_USAGE,
+    # 금융 행위 계열
+    "한도": ROUTE_CARD_USAGE,
+    "납부": ROUTE_CARD_USAGE,
+    "결제": ROUTE_CARD_USAGE,
+    "이체": ROUTE_CARD_USAGE,
+    "충전": ROUTE_CARD_USAGE,
+    "환불": ROUTE_CARD_USAGE,
+    "교환": ROUTE_CARD_USAGE,
 }
 
 WEAK_INTENT_CANONICALS = tuple(WEAK_INTENT_ROUTE_HINTS.keys())
 
-STOPWORDS = {"n/a", "na", "none", "문의", "안내"}
+STOPWORDS = {"n/a", "na", "none", "문의"}
 
 _WS_RE = re.compile(r"\s+")
 
