@@ -1,10 +1,11 @@
+# syntax=docker/dockerfile:1
+
 # 1단계: 베이스 이미지
 FROM python:3.11-slim as base
 
 # 환경 변수 설정
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 # 시스템 패키지 업데이트 및 필수 도구 설치
@@ -23,8 +24,9 @@ WORKDIR /app
 # 2단계: 의존성 설치
 COPY requirements.txt .
 
-# PyKoSpacing은 git에서 설치하므로 git이 필요
-RUN pip install --upgrade pip && \
+# BuildKit 캐시 마운트로 pip 다운로드 캐시 재사용
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --upgrade pip && \
     pip install -r requirements.txt
 
 # 3단계: 애플리케이션 코드 복사

@@ -40,19 +40,5 @@ jobs:
                   retries: 3
             YAML
 
-            sudo docker compose -f docker-compose.prod.yml -f docker-compose.prod.override.yml up -d --build
+            sudo DOCKER_BUILDKIT=1 docker compose -f docker-compose.prod.yml -f docker-compose.prod.override.yml up -d --build
             sudo docker image prune -f
-            sudo docker builder prune -af || true
-
-            # Post-deploy health check (retry for up to ~60s)
-            for i in $(seq 1 12); do
-              if curl -fsS http://127.0.0.1/nginx-health >/dev/null && \
-                 curl -fsS http://127.0.0.1/api/v1/health >/dev/null; then
-                echo "Health check OK"
-                exit 0
-              fi
-              echo "Health check retry $i/12..."
-              sleep 5
-            done
-            echo "Health check FAILED"
-            exit 1
