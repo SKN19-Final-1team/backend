@@ -44,6 +44,7 @@ _CARD_FIELDS = (
     "note",
     "documentType",
     "sourceTable",
+    "relevanceScore",
 )
 
 
@@ -114,6 +115,7 @@ def _doc_to_card_base(doc: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         "note": structured.get("note") or meta.get("note") or "",
         "documentType": meta.get("documentType") or meta.get("document_type") or _table_to_doc_type(raw_table) or "general",
         "sourceTable": raw_table,
+        "relevanceScore": round(float(doc.get("score") or 0) * 100),
     }
 
 

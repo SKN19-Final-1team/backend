@@ -329,7 +329,12 @@ async def build_card_response(
         "currentSituation": current_cards,
         "nextStep": next_cards,
         "routing": routing,
-        "meta": {"model": config.model, "doc_count": len(docs), "context_chars": 0},
+        "meta": {
+            "model": config.model,
+            "doc_count": len(docs),
+            "context_chars": 0,
+            "search_time_ms": round((t_post - t_start) * 1000),
+        },
     }
 
 

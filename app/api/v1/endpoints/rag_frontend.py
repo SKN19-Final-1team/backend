@@ -40,6 +40,8 @@ def _to_front_card(card):
         "time": card.get("time") or "",
         "note": card.get("note") or "",
         "documentType": document_type,
+        "sourceTable": card.get("sourceTable") or "",
+        "relevanceScore": card.get("relevanceScore") or 0,
     }
 
 
