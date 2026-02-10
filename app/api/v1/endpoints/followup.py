@@ -50,6 +50,7 @@ def log_acw_result(consultation_id: str, is_simulation: bool,
             },
             "evaluation": {
                 "emotion_score": feedback.get("emotion_score", 0),
+                "manual_score": feedback.get("manual_score", None),
                 "similarity_score": feedback.get("similarity_score", None),
             },
         }

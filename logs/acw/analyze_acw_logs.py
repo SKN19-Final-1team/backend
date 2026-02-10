@@ -122,6 +122,33 @@ def analyze(entries):
         print(f"  평균: {sum(emotion_scores)/len(emotion_scores):.1f}")
         print(f"  범위: {min(emotion_scores)} ~ {max(emotion_scores)}")
 
+    # ── 7. 매뉴얼 준수 점수 분포 ──
+    print("\n── 7. 매뉴얼 준수 점수 분포 (50점 만점) ──")
+    manual_scores = []
+    for e in entries:
+        ms = e.get("evaluation", {}).get("manual_score")
+        if ms is not None:
+            try:
+                manual_scores.append(int(ms))
+            except (ValueError, TypeError):
+                pass
+    if manual_scores:
+        avg_manual = sum(manual_scores) / len(manual_scores)
+        perfect = sum(1 for s in manual_scores if s == 50)
+        deducted = sum(1 for s in manual_scores if s < 50)
+        print(f"  수집된 건수: {len(manual_scores)}/{total}")
+        print(f"  평균: {avg_manual:.1f}점")
+        print(f"  만점(50점): {perfect}건 ({perfect/len(manual_scores)*100:.0f}%)")
+        print(f"  감점 발생: {deducted}건 ({deducted/len(manual_scores)*100:.0f}%)")
+        print(f"  범위: {min(manual_scores)} ~ {max(manual_scores)}")
+        # 점수 분포
+        dist = Counter(manual_scores)
+        for score, cnt in sorted(dist.items(), reverse=True):
+            bar = "█" * cnt
+            print(f"    {score}점: {cnt}건 {bar}")
+    else:
+        print("  매뉴얼 점수 데이터 없음 (이전 버전 로그)")
+
     # ── 개선 지표 요약 ──
     print("\n" + "=" * 70)
     print("  개선 지표 요약")
@@ -132,6 +159,9 @@ def analyze(entries):
     print(f"  {'구조화 섹션 비율':<26} {'0%':<15} {f'{has_sections/total*100:.0f}%':<15} {'90%+':<15}")
     print(f"  {'category_raw 유효 분류율':<22} {'0%':<15} {f'{valid/total*100:.0f}%':<15} {'90%+':<15}")
     print(f"  {'평균 응답 시간':<26} {'-':<15} {f'{avg_time:.2f}초':<15} {'<10초':<15}")
+    if manual_scores:
+        print(f"  {'매뉴얼 평균 점수':<24} {'-':<15} {f'{avg_manual:.1f}/50':<15} {'45+':<15}")
+        print(f"  {'매뉴얼 만점 비율':<24} {'-':<15} {f'{perfect/len(manual_scores)*100:.0f}%':<15} {'80%+':<15}")
     print()
 
 
