@@ -67,7 +67,7 @@ async def call_websocket_endpoint(websocket: WebSocket, consultation_id: str = N
                         "ts": datetime.now().isoformat(),
                         "sid": session_id,
                         "query": text[:100],
-                        "routing": {k: v for k, v in routing.items() if k in ("decision", "matched", "card_name", "intent")},
+                        "routing": {k: v for k, v in routing.items() if k in ("route", "matched", "should_search", "domain_score", "answer_class")},
                         "doc_count": len(doc_titles),
                         "doc_titles": doc_titles[:5],
                     }
