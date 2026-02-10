@@ -110,7 +110,8 @@ async def get_frequent_inquiries(
                 SELECT
                     id, keyword, question, count, trend, content,
                     related_document_id, related_document_title,
-                    related_document_regulation, related_document_summary
+                    related_document_regulation, related_document_summary,
+                    related_source_table, related_document_type
                 FROM frequent_inquiries
                 WHERE is_active = true
                 ORDER BY count DESC, id ASC
@@ -156,7 +157,8 @@ async def get_frequent_inquiry_by_id(inquiry_id: int):
                 SELECT
                     id, keyword, question, count, trend, content,
                     related_document_id, related_document_title,
-                    related_document_regulation, related_document_summary
+                    related_document_regulation, related_document_summary,
+                    related_source_table, related_document_type
                 FROM frequent_inquiries
                 WHERE id = %s AND is_active = true
             """, (inquiry_id,))

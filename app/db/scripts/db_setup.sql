@@ -292,6 +292,8 @@ CREATE TABLE IF NOT EXISTS frequent_inquiries (
     related_document_title VARCHAR(300),      -- 관련 문서 제목
     related_document_regulation VARCHAR(200), -- 관련 규정
     related_document_summary TEXT,            -- 관련 문서 요약
+    related_source_table VARCHAR(100),       -- 관련 문서 출처 테이블 (Phase C)
+    related_document_type VARCHAR(50),       -- 관련 문서 타입 (guide/terms/faq 등)
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP
