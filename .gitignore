@@ -48,6 +48,7 @@ iCloud Drive/
 # Logs
 *.log
 logs/
+!logs/acw/analyze_acw_logs.py
 
 # Database
 *.db

@@ -10,11 +10,60 @@ from fastapi import APIRouter, HTTPException
 from app.core.prompt import FEEDBACK_SYSTEM_PROMPT, EDU_FEEDBACK_SYSTEM_PROMPT
 import time
 import asyncio
+import json
+import os
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
 router = APIRouter()
+
+# ============================================================
+# ACW 로그 시스템 - 개선 추적용
+# ============================================================
+ACW_LOG_DIR = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'logs', 'acw')
+
+def log_acw_result(consultation_id: str, is_simulation: bool,
+                   summarize_result: dict, feedback: dict,
+                   parallel_time: float, script_length: int):
+    """ACW LLM 결과를 JSON 로그로 저장 (개선 추적용)"""
+    try:
+        os.makedirs(ACW_LOG_DIR, exist_ok=True)
+        log_entry = {
+            "timestamp": datetime.now().isoformat(),
+            "consultation_id": consultation_id,
+            "is_simulation": is_simulation,
+            "parallel_time_sec": round(parallel_time, 2),
+            "script_length": script_length,
+            "summary": {
+                "title": summarize_result.get("title", ""),
+                "category_main": summarize_result.get("category_main", ""),
+                "category_sub": summarize_result.get("category_sub", ""),
+                "category_raw": summarize_result.get("category_raw", ""),
+                "result_length": len(summarize_result.get("result", "")),
+                "result_has_sections": any(
+                    tag in summarize_result.get("result", "")
+                    for tag in ["[처리 내역]", "[고객 요청사항]", "[상담사 조치]"]
+                ),
+                "transfer_dep": summarize_result.get("transfer_dep", "없음"),
+                "handled_categories_count": len(summarize_result.get("handled_categories", [])),
+            },
+            "evaluation": {
+                "emotion_score": feedback.get("emotion_score", 0),
+                "similarity_score": feedback.get("similarity_score", None),
+            },
+        }
+
+        # 날짜별 로그 파일
+        log_file = os.path.join(ACW_LOG_DIR, f"acw_{datetime.now().strftime('%Y%m%d')}.jsonl")
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(log_entry, ensure_ascii=False) + '\n')
+
+        print(f"[ACW LOG] {consultation_id} | cat_raw={summarize_result.get('category_raw','')} | result_len={len(summarize_result.get('result',''))} | sections={'Y' if log_entry['summary']['result_has_sections'] else 'N'}")
+
+    except Exception as e:
+        print(f"[ACW LOG ERROR] 로그 저장 실패: {e}")
+
 
 class SummaryRequest(BaseModel):
     consultation_id: str
@@ -91,6 +140,16 @@ async def create_summary(request: SummaryRequest):
 
         parallel_time = time.time() - start_parallel
         print(f"병렬 처리 시간(요약+피드백): {parallel_time:.2f}초")
+
+        # ACW 로그 저장 (개선 추적용)
+        log_acw_result(
+            consultation_id=request.consultation_id,
+            is_simulation=request.is_simulation,
+            summarize_result=summarize_result,
+            feedback=feedback,
+            parallel_time=parallel_time,
+            script_length=len(script) if script else 0,
+        )
 
         return {
             "isSuccess": True,
