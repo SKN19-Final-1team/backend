@@ -42,7 +42,7 @@ POLICY_PINS = [
     {
         "name": "dadungi_benefit",
         "table": "service_guide_documents",
-        "doc_ids": ["dadungi_013"],
+        "doc_ids": ["서울시다둥이행복카드_13"],
         "tokens": ["다둥이", "배달앱", "편의점", "서울시다둥이"],
     },
     {
@@ -81,7 +81,7 @@ def build_pin_requests(
         if matched_entity == "K-패스":
             guide_ids = ["k패스_13", "k패스_14", "k패스_2"]
         elif matched_entity == "다둥이":
-            guide_ids = ["dadungi_013"]
+            guide_ids = ["서울시다둥이행복카드_13"]
         elif matched_entity == "국민행복":
             guide_ids = ["국민행복카드_28"]
         elif matched_entity == "나라사랑":

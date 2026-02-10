@@ -440,6 +440,12 @@ def build_where_clause(
         if payment_group:
             clauses.append(payment_group)
 
+    # 특수카드 ID 패턴 제외 (B-6: 쿼리에 특수카드명이 없을 때 오염 방지)
+    exclude_id_patterns = _as_list(filters.get("exclude_id_patterns"))
+    if exclude_id_patterns:
+        clauses.append("NOT (id LIKE ANY(%s))")
+        params.append(exclude_id_patterns)
+
     if not clauses:
         return "", []
     return " WHERE " + " AND ".join(clauses), params
@@ -732,6 +738,23 @@ def text_search(
             like_where = exclude_sql
             like_params.extend([exclude_like_any, exclude_like_any, exclude_like_any])
     
+    # 특수카드 ID 패턴 제외 (B-6)
+    exclude_id_patterns = _as_list(filters.get("exclude_id_patterns"))
+    if exclude_id_patterns:
+        exclude_id_sql = "NOT (id LIKE ANY(%s))"
+        if use_trgm and trgm_where:
+            trgm_where = _and_conditions(trgm_where, exclude_id_sql)
+            trgm_params.append(exclude_id_patterns)
+        elif use_trgm and trgm_where == "":
+            trgm_where = exclude_id_sql
+            trgm_params.append(exclude_id_patterns)
+        if like_where:
+            like_where = _and_conditions(like_where, exclude_id_sql)
+            like_params.append(exclude_id_patterns)
+        else:
+            like_where = exclude_id_sql
+            like_params.append(exclude_id_patterns)
+
     if not trgm_where and not like_where:
         return []
 

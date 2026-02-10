@@ -17,6 +17,26 @@ DOCUMENT_SOURCE_POLICY_MAP = {
 }
 DEFAULT_DOCUMENT_SOURCES = ["guide_merged", "guide_general"]
 
+# B-6: 특수카드 검색 오염 방지 — 쿼리에 특수카드명이 없으면 해당 문서를 제외
+_SPECIAL_ENTITIES = {
+    "다둥이": ["다둥이", "서울시다둥이"],
+    "국민행복": ["국민행복"],
+    "K-패스": ["k패스", "k-패스", "kpass"],
+    "나라사랑": ["나라사랑"],
+    "으랏차차": ["으랏차차", "으랏차"],
+    "민생": ["민생", "소비쿠폰"],
+    "시니어": ["시니어", "어르신"],
+}
+_SPECIAL_CARD_ID_PATTERNS = [
+    "서울시다둥이%",
+    "k패스%",
+    "나라사랑%",
+    "narasarang%",
+    "국민행복%",
+    "minsaeng%",
+    "senior%",
+]
+
 # Pin 허용 threshold
 _PIN_SCORE_THRESHOLD = 0.3  # vector search 기준으로 조정
 
@@ -57,7 +77,27 @@ def post_filter_docs(query: str, docs: List[Dict[str, Any]]) -> List[Dict[str, A
             if filtered:
                 docs = filtered
 
+    # B-6: 특수카드 문서 후처리 제거 (SQL 필터를 통과한 잔여분 정리)
+    has_special = any(
+        any(token in q for token in tokens)
+        for tokens in _SPECIAL_ENTITIES.values()
+    )
+    if not has_special:
+        filtered = [d for d in docs if not _is_special_card_doc(d)]
+        if filtered:
+            docs = filtered
+
     return docs
+
+
+def _is_special_card_doc(doc: Dict[str, Any]) -> bool:
+    """특수카드 문서 여부를 ID 기반으로 판별"""
+    doc_id = str(doc.get("id") or doc.get("db_id") or "").lower()
+    _prefixes = (
+        "서울시다둥이", "k패스", "나라사랑", "narasarang",
+        "국민행복", "minsaeng", "senior",
+    )
+    return any(doc_id.startswith(p) for p in _prefixes)
 
 
 def _pin_allowed(
@@ -117,6 +157,13 @@ async def retrieve_docs(
     db_route = routing.get("db_route")
     routing_for_retrieve = routing
     normalized_query = (query or "").lower()
+
+    # B-6: 특수카드 엔티티 탐지 (scope 필터 + 핀 로직에서 사용)
+    matched_entity = ""
+    for entity, tokens in _SPECIAL_ENTITIES.items():
+        if any(token in normalized_query for token in tokens):
+            matched_entity = entity
+            break
 
     # 테이블 선택 (card_products vs service_guide_documents)
     sources = set()
@@ -212,6 +259,16 @@ async def retrieve_docs(
     if not sources:
         sources.update({"card_products", "service_guide_documents"})
 
+    # B-6: 특수카드 미언급시 해당 문서 제외 (검색 오염 방지)
+    if not matched_entity and "service_guide_documents" in sources:
+        if routing_for_retrieve is routing:
+            routing_for_retrieve = dict(routing)
+        filters_copy = dict(routing_for_retrieve.get("filters", routing_for_retrieve.get("boost", {})))
+        existing_excludes = list(filters_copy.get("exclude_id_patterns", []))
+        existing_excludes.extend(_SPECIAL_CARD_ID_PATTERNS)
+        filters_copy["exclude_id_patterns"] = existing_excludes
+        routing_for_retrieve["filters"] = filters_copy
+
     # 검색 실행: simple_retrieve (vector-first)
     from app.rag.retriever.simple_retriever import simple_retrieve
     retrieved_docs = simple_retrieve(
@@ -251,20 +308,7 @@ async def retrieve_docs(
     # 핀 로직: 중요 문서 보강
     loss_terms = ("분실", "도난", "잃어버", "분실신고", "도난신고")
     critical_pin = False
-    matched_entity = ""
-
-    # 특수 엔티티 매칭 (핀 로직에만 사용)
-    special_entities = {
-        "다둥이": ["다둥이", "서울시다둥이"],
-        "국민행복": ["국민행복"],
-        "K-패스": ["k패스", "k-패스", "kpass"],
-        "나라사랑": ["나라사랑"],
-        "으랏차차": ["으랏차차", "으랏차"],
-    }
-    for entity, tokens in special_entities.items():
-        if any(token in normalized_query for token in tokens):
-            matched_entity = entity
-            break
+    # matched_entity는 함수 초입에서 이미 탐지됨 (B-6)
 
     if route_name == "card_usage":
         if any(term in normalized_query for term in loss_terms):
