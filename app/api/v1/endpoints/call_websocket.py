@@ -63,6 +63,11 @@ async def call_websocket_endpoint(websocket: WebSocket, consultation_id: str = N
                     for card in (safe_result.get("currentSituation", []) + safe_result.get("nextStep", [])):
                         if isinstance(card, dict) and card.get("title"):
                             doc_titles.append(card["title"])
+                    meta = safe_result.get("meta", {})
+                    relevance_scores = []
+                    for card in (safe_result.get("currentSituation", []) + safe_result.get("nextStep", [])):
+                        if isinstance(card, dict) and card.get("relevanceScore"):
+                            relevance_scores.append(card["relevanceScore"])
                     log_entry = {
                         "ts": datetime.now().isoformat(),
                         "sid": session_id,
@@ -70,6 +75,8 @@ async def call_websocket_endpoint(websocket: WebSocket, consultation_id: str = N
                         "routing": {k: v for k, v in routing.items() if k in ("route", "matched", "should_search", "domain_score", "answer_class")},
                         "doc_count": len(doc_titles),
                         "doc_titles": doc_titles[:5],
+                        "relevance_scores": relevance_scores,
+                        "search_time_ms": meta.get("search_time_ms", 0),
                     }
                     log_file = os.path.join(rag_log_dir, f"rag_{datetime.now().strftime('%Y%m%d')}.jsonl")
                     with open(log_file, 'a', encoding='utf-8') as f:
