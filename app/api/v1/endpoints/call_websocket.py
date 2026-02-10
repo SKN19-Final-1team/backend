@@ -1,4 +1,6 @@
 import os
+import json
+from datetime import datetime
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
 import asyncio
@@ -51,6 +53,29 @@ async def call_websocket_endpoint(websocket: WebSocket, consultation_id: str = N
             if result and websocket.client_state == WebSocketState.CONNECTED:
                 safe_result = jsonable_encoder(result)
                 await websocket.send_json({"type": "rag", "data": safe_result})
+
+                # RAG 검색 로그 (개선 추적용, 핵심 로직 변경 없음)
+                try:
+                    rag_log_dir = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'logs', 'rag')
+                    os.makedirs(rag_log_dir, exist_ok=True)
+                    routing = safe_result.get("routing", {})
+                    doc_titles = []
+                    for card in (safe_result.get("currentSituation", []) + safe_result.get("nextStep", [])):
+                        if isinstance(card, dict) and card.get("title"):
+                            doc_titles.append(card["title"])
+                    log_entry = {
+                        "ts": datetime.now().isoformat(),
+                        "sid": session_id,
+                        "query": text[:100],
+                        "routing": {k: v for k, v in routing.items() if k in ("decision", "matched", "card_name", "intent")},
+                        "doc_count": len(doc_titles),
+                        "doc_titles": doc_titles[:5],
+                    }
+                    log_file = os.path.join(rag_log_dir, f"rag_{datetime.now().strftime('%Y%m%d')}.jsonl")
+                    with open(log_file, 'a', encoding='utf-8') as f:
+                        f.write(json.dumps(log_entry, ensure_ascii=False) + '\n')
+                except Exception:
+                    pass  # 로그 실패 시 무시
 
         except Exception as e:
             print(f"[{session_id}] 처리 중 에러 : {e}")
