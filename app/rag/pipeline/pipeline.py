@@ -1,5 +1,6 @@
 from typing import Any, Dict, Optional
 import asyncio
+import logging
 import os
 
 from app.guide.guide_pipeline import build_guide_response
@@ -9,6 +10,8 @@ from app.rag.pipeline.search import run_search
 from app.rag.cache.doc_title_cache import record_doc_titles
 from app.rag.router.signals import has_vocab_match
 
+logger = logging.getLogger(__name__)
+
 async def run_rag(
     query: str,
     config: Optional[RAGConfig] = None,
@@ -17,11 +20,12 @@ async def run_rag(
     cfg = config or RAGConfig()
     require_vocab_match = os.getenv("RAG_REQUIRE_VOCAB_MATCH", "1") != "0"
     if require_vocab_match and not has_vocab_match(query):
+        logger.info("VocabGate blocked query: %r", query[:80])
         return {
             "currentSituation": [],
             "nextStep": [],
             "guidanceScript": "",
-            "guide_script": {"message": ""},
+            "guide_script": {"message": "무엇을 도와드릴까요? (예: 분실신고, 연회비, 포인트)"},
             "routing": {
                 "should_search": False,
                 "should_route": False,

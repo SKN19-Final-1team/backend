@@ -1,7 +1,10 @@
+import logging
 import os
 import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 from flashtext import KeywordProcessor
 
@@ -428,21 +431,26 @@ def extract_signals(query: str) -> Signals:
         if kw_result.corrected_text:
             normalized = _normalize_query(kw_result.corrected_text)
     else:
-        # 기존 flashtext 기반 추출 (fallback)
+        # FlashText + fallback 병합 (B-7: compound word 누락 해결)
+        # FlashText의 greedy L→R 소비로 "포인트적립"에서 "적립"이 누락되는 문제를
+        # _fallback_contains(substring match)로 항상 보충하여 해결
         card_kp = _ensure_card_kp()
-        card_names = unique_in_order(card_kp.extract_keywords(normalized))
-        actions = unique_in_order(_ACTION_KP.extract_keywords(normalized))
-        payments = unique_in_order(_PAYMENT_KP.extract_keywords(normalized))
-        weak_intents = unique_in_order(_WEAK_INTENT_KP.extract_keywords(normalized))
-
-        if not card_names:
-            card_names = unique_in_order(_fallback_contains(get_card_name_synonyms(), normalized))
-        if not actions:
-            actions = unique_in_order(_fallback_contains(ACTION_SYNONYMS, normalized))
-        if not payments:
-            payments = unique_in_order(_fallback_contains(PAYMENT_SYNONYMS, normalized))
-        if not weak_intents:
-            weak_intents = unique_in_order(_fallback_contains(WEAK_INTENT_SYNONYMS, normalized))
+        card_names = unique_in_order([
+            *card_kp.extract_keywords(normalized),
+            *_fallback_contains(get_card_name_synonyms(), normalized),
+        ])
+        actions = unique_in_order([
+            *_ACTION_KP.extract_keywords(normalized),
+            *_fallback_contains(ACTION_SYNONYMS, normalized),
+        ])
+        payments = unique_in_order([
+            *_PAYMENT_KP.extract_keywords(normalized),
+            *_fallback_contains(PAYMENT_SYNONYMS, normalized),
+        ])
+        weak_intents = unique_in_order([
+            *_WEAK_INTENT_KP.extract_keywords(normalized),
+            *_fallback_contains(WEAK_INTENT_SYNONYMS, normalized),
+        ])
 
     # 카드명 보충 (fuzzy matching - keyword_extractor에서 못 찾은 경우)
     if not card_names:
@@ -528,6 +536,7 @@ def has_vocab_match(query: str) -> bool:
         if card_names:
             return True
 
+    logger.debug("VocabGate BLOCKED: query=%r normalized=%r", query, normalized)
     return False
 
 
