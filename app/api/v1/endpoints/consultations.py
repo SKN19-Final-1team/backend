@@ -62,6 +62,7 @@ class SaveConsultationRequest(BaseModel):
     referencedDocuments: List[ReferencedDocument] = []
     referencedDocumentIds: List[str] = []
     processingTimeline: List[ProcessingTimelineItem] = []  # ⭐ 처리 타임라인
+    categoryRaw: Optional[str] = None
     sentiment: Optional[str] = None
     feedbackScore: Optional[int] = None
     satisfactionScore: Optional[int] = None
@@ -342,6 +343,7 @@ async def save_consultation(request: SaveConsultationRequest):
     print(f"  - employeeId: {request.employeeId}")
     print(f"  - customerId: {request.customerId}")
     print(f"  - category: {request.category}")
+    print(f"  - categoryRaw: {request.categoryRaw}")
     print(f"  - referencedDocuments: {len(request.referencedDocuments)}개")
     print(f"  - processingTimeline: {len(request.processingTimeline)}개")
 
@@ -397,6 +399,7 @@ async def save_consultation(request: SaveConsultationRequest):
                         status = %s,
                         category_main = %s,
                         category_sub = %s,
+                        category_raw = %s,
                         title = %s,
                         call_date = %s,
                         call_time = %s,
@@ -422,6 +425,7 @@ async def save_consultation(request: SaveConsultationRequest):
                     db_status,
                     category_main,
                     category_sub,
+                    request.categoryRaw,
                     request.title or f"{category_main} 상담",
                     call_date,
                     call_time,
@@ -446,7 +450,7 @@ async def save_consultation(request: SaveConsultationRequest):
                 cur.execute("""
                     INSERT INTO consultations (
                         id, customer_id, agent_id, status,
-                        category_main, category_sub, title,
+                        category_main, category_sub, category_raw, title,
                         call_date, call_time, call_duration, acw_duration,
                         ai_summary, agent_notes, transcript,
                         follow_up_schedule, transfer_department, transfer_notes,
@@ -454,7 +458,7 @@ async def save_consultation(request: SaveConsultationRequest):
                         created_at
                     ) VALUES (
                         %s, %s, %s, %s,
-                        %s, %s, %s,
+                        %s, %s, %s, %s,
                         %s, %s, %s, %s,
                         %s, %s, %s,
                         %s, %s, %s,
@@ -469,6 +473,7 @@ async def save_consultation(request: SaveConsultationRequest):
                     db_status,
                     category_main,
                     category_sub,
+                    request.categoryRaw,
                     request.title or f"{category_main} 상담",
                     call_date,
                     call_time,

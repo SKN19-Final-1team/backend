@@ -11,6 +11,7 @@ from app.core.prompt import FEEDBACK_SYSTEM_PROMPT, EDU_FEEDBACK_SYSTEM_PROMPT
 import time
 import asyncio
 from pydantic import BaseModel
+from typing import Optional
 from datetime import datetime
 
 router = APIRouter()
@@ -114,6 +115,7 @@ class SaveConsultationRequest(BaseModel):
     status: str
     category: str
     subcategory: str
+    categoryRaw: Optional[str] = None
     aiSummary: str
     memo: str
     followUpTasks: str
